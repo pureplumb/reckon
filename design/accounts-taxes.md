@@ -34,17 +34,25 @@ whatever it holds. Allocation inside an account is out of scope (see below).
 
 ### Input
 
+Following [architecture.md](architecture.md#1-input-grouped-by-topic), this
+stage changes the `portfolio` group and adds a `tax` group:
+
 ```ts
 interface Account {
   id: string;                                  // unique
   type: "traditional" | "roth" | "taxable";
   balance: number;                             // starting balance, >= 0
-  returnRate: number;                          // blended expected return
+  returnRate: number;                          // blended expected return; see Decision 4
 }
 
 interface ProjectionInput {
-  accounts: Account[];   // replaces startBalance; total = sum of balances
-  // ...other fields as in stage 2
+  timeline:    { startYear: number; years: number };
+  assumptions: { inflationRate: number };     // returnRate moves to each account (Decision 4)
+  portfolio:   { accounts: Account[] };       // replaces startBalance; total = sum of balances
+  spending:    { annual: number };
+  flows?:      CashFlow[];
+  household:   { birthYear: number };         // from stage 3; needed for RMDs
+  tax:         { /* to be designed; see Decision 2 */ };
 }
 
 interface Contribution extends FlowBase {
@@ -54,15 +62,17 @@ interface Contribution extends FlowBase {
 }
 ```
 
-`returnRate` moves from the projection input to each account (see Decision 4).
+Modules: `accounts.ts` (accounts, withdrawal order) and `tax.ts` (taxes,
+RMDs), per [architecture.md](architecture.md#topic-modules).
 
 ### What goes in the schedule and what goes in `simulate`
 
-Following the rule in [cash-flows.md](cash-flows.md#what-goes-where):
+Following the rule in
+[architecture.md](architecture.md#2-the-schedule-everything-known-in-advance):
 anything known in advance goes in `buildSchedule`; anything that depends on
 the portfolio goes in `simulate`.
 
-| Known in advance (`buildSchedule`) | Depends on the portfolio (`simulate`) |
+| Known in advance (schedule builders) | Depends on the portfolio (`simulate`) |
 |---|---|
 | Contributions to each account per year | Each account's balance |
 | Each account's return rate per year (constant here; return sequences in stage 7) | Which accounts each withdrawal comes from |
@@ -70,30 +80,51 @@ the portfolio goes in `simulate`.
 | Spending and income | Taxes on the withdrawals and income |
 
 The RMD row shows the split: the schedule holds the **percentage**, and
-`simulate` applies it to the **balance**.
+`simulate` applies it to the **balance**. New builders: `returnRatesFor`,
+`rmdPercentFor`; `flowsFor` gains contributions per account.
 
 ### Simulation
 
 `SimState.accounts`, introduced with a single account in stage 2, now holds
-every account:
+every account. This stage adds one year step and extends two others, in the
+order set in
+[architecture.md](architecture.md#3-simulation-year-steps-in-a-fixed-order):
+
+| Order | Step | Change in this stage |
+|---|---|---|
+| 1 | `depositContributions` | Deposits into each contribution's `account` |
+| 2 | `takeRmds` | **New.** `s.rmdPercent` × last year-end balance of each traditional account. Before step 3, because RMDs count toward spending |
+| 3 | `withdrawForSpending` | `need = spending + taxes - income - RMDs`. Withdraws across accounts in the chosen order (Decision 1), grossed up so that spending is still covered after tax |
+| 4 | `reinvest` | Also reinvests RMDs above what was needed, into the taxable account |
+| 5 | `grow` | Each account at its own rate (`s.returnRates[id]`) |
+
+Still to work out in this stage: how the tax gross-up interacts with
+withdrawal order (the tax depends on which account the money comes from,
+and the amount withdrawn depends on the tax).
+
+### Equations
+
+Both yearly equations in
+[architecture.md](architecture.md#4-two-equations-every-year) gain terms:
 
 ```
-for s in schedule:
-    deposit s.contributionsByAccount into state.accounts
-    take RMDs from traditional accounts: s.rmdPercent × last year-end balance
-    need        = s.spending - s.income - RMDs (after tax)
-    withdrawals = withdrawFrom(state.accounts, need, order)   // capped per account
-    taxes       = tax on income, RMDs and withdrawals; gross up so spending is covered
-    grow each account by s.returnRates[id]
-    record row: per-account balances, plus totals as today
+income + withdrawals + shortfall = spending + taxes + reinvested
+endBalance = startBalance + contributions + reinvested - withdrawals + growth
 ```
 
-The order of these steps, and how the tax gross-up interacts with withdrawal
-order, are to be worked out in this stage.
+- `withdrawals` now includes RMDs and the tax gross-up.
+- `taxes` is no longer 0.
+- `reinvested` includes RMDs above what was needed.
+- The portfolio equation holds for each account and for the total.
+
+`spending` keeps its meaning (what is spent on living), and `shortfall` is
+still only unfunded spending.
 
 ### Output
 
 - Each row gains per-account balances and withdrawals, keyed by account id.
+  This is the point to group row fields (`row.balances`, `row.cash`), per
+  [architecture.md](architecture.md#5-output).
 - `startBalance`, `endBalance` and `endBalanceReal` stay, as totals across
   accounts.
 - New: taxes paid per year and in total, and RMDs per year.
@@ -130,7 +161,8 @@ Open.
 
 ## Changes to reference docs
 
-To be listed once the design is settled. Expected: `startBalance` and
-`returnRate` replaced by `accounts` in **projection.md** (breaking changes),
-account and contribution rules in **validation.md**, and the stage status in
-**README.md**.
+To be listed once the design is settled. Expected: `portfolio.startBalance`
+and `assumptions.returnRate` replaced by `portfolio.accounts` in
+**projection.md** (breaking changes), new `tax` group and account and
+contribution rules in **validation.md**, the new modules and steps in
+**architecture.md**, and the stage status in **README.md**.

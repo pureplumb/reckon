@@ -1,4 +1,4 @@
-# reckon
+# Reckon
 
 To install dependencies:
 

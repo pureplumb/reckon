@@ -6,7 +6,7 @@ const example: ProjectionInput = {
     startBalance: 1_000_000,
     returnRate: 0.05,
     inflationRate: 0.03,
-    annualWithdrawal: 40_000,
+    spending: 40_000,
     years: 3,
     startYear: 2026,
 };
@@ -47,7 +47,7 @@ describe("withdrawals and growth", () => {
             startBalance: 1_000,
             returnRate: 0,
             inflationRate: 0,
-            annualWithdrawal: 100,
+            spending: 100,
             years: 5,
             startYear: 2026,
         });
@@ -77,7 +77,7 @@ describe("withdrawals and growth", () => {
     test("no withdrawal: balance compounds at the return rate", () => {
         const { summary } = projectPortfolio({
             ...example,
-            annualWithdrawal: 0,
+            spending: 0,
             years: 10,
         });
         expect(summary.endBalance).toBeCloseTo(1_000_000 * 1.05 ** 10);
@@ -124,7 +124,7 @@ describe("depletion", () => {
         startBalance: 100,
         returnRate: 0,
         inflationRate: 0.1,
-        annualWithdrawal: 60,
+        spending: 60,
         years: 4,
         startYear: 2026,
     });
@@ -197,9 +197,9 @@ describe("input validation", () => {
         ["inflationRate", -1],
         ["inflationRate", 1.0001],
         ["inflationRate", NaN],
-        ["annualWithdrawal", -1],
-        ["annualWithdrawal", NaN],
-        ["annualWithdrawal", Infinity],
+        ["spending", -1],
+        ["spending", NaN],
+        ["spending", Infinity],
         ["years", 0],
         ["years", 151],
         ["years", 2.5],
@@ -219,7 +219,7 @@ describe("input validation", () => {
         ["returnRate", 1],
         ["inflationRate", -0.9999],
         ["inflationRate", 1],
-        ["annualWithdrawal", 0],
+        ["spending", 0],
         ["years", 1],
         ["years", 150],
     ])("accepts boundary %s = %p", (field, value) => {

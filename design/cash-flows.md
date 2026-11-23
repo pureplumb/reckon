@@ -1,6 +1,11 @@
 # Stage 2: Cash Flows
 
-**Status:** Draft. All decisions accepted on 2026-11-22.
+**Status:** Draft. All decisions accepted (1–6 on 2026-11-22, 7 on
+2026-11-23).
+
+This stage introduces the engine structure described in
+[architecture.md](architecture.md): input grouped by topic, per-topic schedule
+builders, and year steps in a fixed order.
 
 Adds money arriving each year: **contributions** (savings deposited into the
 portfolio) and **income** (pension, Social Security and similar). Both start
@@ -59,16 +64,23 @@ interface Income extends FlowBase {
 
 type CashFlow = Contribution | Income;
 
+// Grouped by topic; see Decision 7 and architecture.md
 interface ProjectionInput {
-  startBalance: number;  // >= 0 (was > 0)
-  returnRate: number;
-  inflationRate: number;
-  spending: number;      // replaces annualWithdrawal; see Decision 3
-  flows?: CashFlow[];
-  years: number;
-  startYear: number;
+  timeline:    { startYear: number; years: number };
+  assumptions: { returnRate: number; inflationRate: number };
+  portfolio:   { startBalance: number };  // >= 0 (was > 0)
+  spending:    { annual: number };        // replaces annualWithdrawal; see Decision 3
+  flows?:      CashFlow[];
 }
 ```
+
+| Was | Now |
+|---|---|
+| `startYear`, `years` | `timeline.startYear`, `timeline.years` |
+| `returnRate`, `inflationRate` | `assumptions.returnRate`, `assumptions.inflationRate` |
+| `startBalance` | `portfolio.startBalance` |
+| `annualWithdrawal` | `spending.annual` |
+| — | `flows` (new) |
 
 - `CashFlow` is a **discriminated union**: `type` tells TypeScript which kind
   of flow it is, and after checking it the compiler knows which fields exist
@@ -79,18 +91,28 @@ interface ProjectionInput {
 - Each kind can gain its own fields later without affecting the others
   (Social Security: claiming age and benefit amount; pension: survivor
   benefit), or become its own interface (`SocialSecurity extends FlowBase`).
-  Code that handles flows uses a `switch` on `type` with an exhaustiveness
-  check (`const unhandled: never = flow`), so the compiler points out every
-  place a new kind must be handled.
+  Code that handles flows is exhaustive over `type`, so the compiler points
+  out every place a new kind must be handled. Which form to use depends on
+  what each kind needs:
+
+  | Each kind... | Use | Example |
+  |---|---|---|
+  | maps to a value | a lookup table checked with `satisfies Record<CashFlow["type"], …>` | which total a flow adds to (see [The schedule](#the-schedule)) |
+  | needs its own logic | a `switch` on `type` ending in `const unhandled: never = flow` | stage 6: Social Security is taxed under its own formula |
+
+  TypeScript has no `match` expression. The `ts-pattern` library provides
+  one, but it's a dependency worth adding only if code starts matching on
+  combinations of fields in several places.
 - Classes are not used for flows: class instances don't survive conversion to
   and from JSON, which would break the plain-data principle.
-- `spending` replaces `annualWithdrawal`. Once income exists the amount
+- `spending.annual` replaces `annualWithdrawal`. Once income exists the amount
   withdrawn is calculated rather than entered, so the old name would mislead.
-- **`spending` is a cash flow in concept but not in the `CashFlow` list.**
+- **Spending is a cash flow in concept but not in the `CashFlow` list.**
   There is exactly one spending amount, it's required, and it always grows with
   inflation, so a single number is simpler than a flow. `buildSchedule` treats
-  it like a flow internally. Stage 5 (essential and discretionary spending) may
-  turn it into flows with their own kind, such as `type: "expense"`.
+  it like a flow internally. Stage 5 (essential and discretionary spending)
+  adds fields inside the `spending` group, and may turn it into flows with
+  their own kind, such as `type: "expense"`.
 
 ### A flow's amount in a given year
 
@@ -153,13 +175,38 @@ interface ScheduleYear {
 function buildSchedule(input: ProjectionInput): ScheduleYear[];
 ```
 
-For each year it:
-1. calculates spending: `spending * (1 + inflationRate)^(year - 1)`
-2. works out each flow's amount: 0 outside `fromYear` to `toYear`, otherwise
+It combines a slice from each topic's builder
+([architecture.md](architecture.md#2-the-schedule-everything-known-in-advance)):
+`timelineFor` (year, calendar year), `spendingFor` (spending) and `flowsFor`
+(income, contributions, flows). For each year they:
+1. calculate spending: `spending.annual * (1 + inflationRate)^(year - 1)`
+2. work out each flow's amount: 0 outside `fromYear` to `toYear`, otherwise
    `amount * (1 + g)^(year - 1)` (see
-   [A flow's amount in a given year](#a-flows-amount-in-a-given-year))
-3. adds the amount to `income` or `contributions` according to the flow's
-   `type`, using the `switch` with the `never` check.
+   [A flow's amount in a given year](#a-flows-amount-in-a-given-year)).
+   The `flows` record is built in one step:
+
+   ```ts
+   const amounts = Object.fromEntries(
+     flows.map((f) => [f.id, flowAmount(f, year, input)]),
+   );
+   ```
+
+3. add each amount to `income` or `contributions` according to the flow's
+   `type`, using a lookup table:
+
+   ```ts
+   const TOTAL_FOR = {
+     income: "income",
+     contribution: "contributions",
+   } as const satisfies Record<CashFlow["type"], "income" | "contributions">;
+
+   const totals = { income: 0, contributions: 0 };
+   for (const f of flows) totals[TOTAL_FOR[f.type]] += amounts[f.id]!;
+   ```
+
+   The `satisfies Record<CashFlow["type"], …>` check requires an entry for
+   every flow type, so adding a type without one is a build error. Each
+   amount is calculated once and the totals are read from `amounts`.
 
 For the [worked example](#worked-example) the schedule is:
 
@@ -170,20 +217,9 @@ For the [worked example](#worked-example) the schedule is:
 | 3    | 2028     | 63,654.00 | 20,000.00 | 25,461.60 | 0.00      | 45,461.60 | 0.00          |
 | 4    | 2029     | 65,563.62 | 20,000.00 | 26,225.45 | 0.00      | 46,225.45 | 0.00          |
 
-#### What goes where
-
-The rule for this and later stages: anything that can be known in advance
-goes in `buildSchedule`; anything that depends on the portfolio goes in
-`simulate`. The schedule holds the planned amounts, and `simulate` can adjust
-them as the portfolio changes. Some planned features look like schedule items
-but belong in `simulate`:
-
-| Feature | Where | Why |
-|---|---|---|
-| Social Security claiming age, pension start (stages 3–4) | `buildSchedule` | Fixed by dates and ages |
-| RMDs (stage 6) | `simulate` | Based on the previous year-end balance |
-| Taxes (stage 6) | `simulate` | Depend on how much is withdrawn |
-| Spending guardrails (stage 5) | `simulate` | Cut spending after a bad year |
+The rule for what goes in the schedule and what goes in `simulate`, with a
+table placing later features, is in
+[architecture.md](architecture.md#what-goes-where).
 
 #### Why split it
 - Each stage can be tested on its own: `buildSchedule` (active years,
@@ -203,16 +239,13 @@ and the balance depends on earlier withdrawals. They are state, updated year
 by year in `simulate`. This stage shapes the code so stage 6 adds accounts
 without restructuring the loop:
 
-- **`simulate` keeps balances in a state object keyed by account**, holding a
-  single account for now:
+- **`simulate` keeps balances in a state object keyed by account**
+  (`SimState`, see [architecture.md](architecture.md#3-simulation-year-steps-in-a-fixed-order)),
+  holding a single account for now:
 
   ```ts
-  interface SimState {
-    accounts: Record<string, number>;  // balance per account id
-  }
-
   // Stage 2: one account holding the whole portfolio
-  const state: SimState = { accounts: { default: input.startBalance } };
+  const state: SimState = { accounts: { default: input.portfolio.startBalance } };
   ```
 
   In the algorithm below, `balance` means `state.accounts.default`. Output
@@ -230,30 +263,48 @@ without restructuring the loop:
 All money moves at the **start** of the year, before growth, as in the current
 engine.
 
-`simulate` has the same shape as the current loop. The withdrawal target has
-moved into the schedule, and netting against income and contributions is new:
+Each year runs the stage 2 year steps, in the order set in
+[architecture.md](architecture.md#3-simulation-year-steps-in-a-fixed-order).
+The withdrawal target has moved into the schedule, and netting against income
+and contributions is new:
 
 ```
-balance = startBalance
+balance = portfolio.startBalance
 for s in schedule:
+    // 1. depositContributions
+    balance    = balance + s.contributions
+
+    // 3. withdrawForSpending (step 2, takeRmds, arrives in stage 6)
     need       = s.spending - s.income
-    withdrawal = min(max(need, 0), balance + s.contributions)
-    surplus    = max(-need, 0)        // income above spending; see Decision 2
+    withdrawal = min(max(need, 0), balance)
     shortfall  = max(need, 0) - withdrawal
-    afterFlows = balance + s.contributions + surplus - withdrawal
-    growth     = afterFlows * returnRate
-    endBalance = afterFlows + growth
+    balance    = balance - withdrawal
+
+    // 4. reinvest
+    surplus    = max(-need, 0)        // income above spending; see Decision 2
+    balance    = balance + surplus
+
+    // 5. grow
+    growth     = balance * returnRate
+    balance    = balance + growth
+
     record row: s's fields plus the values above
     update totals and firstShortfallYear
-    balance    = endBalance
 ```
 
-- Contributions made in a year can fund that year's withdrawal.
+- Contributions made in a year can fund that year's withdrawal, because they
+  are deposited first.
 - Start-of-year contributions earn that year's full return. That's the
   generous assumption for money coming in, just as start-of-year withdrawals
   are the cautious one for money going out.
-- When there is no surplus, every year satisfies
-  `income + withdrawal + shortfall = spending`.
+- Every year satisfies the two equations in
+  [architecture.md](architecture.md#4-two-equations-every-year), with
+  `taxes = 0` and `reinvested = surplus`:
+
+  ```
+  income + withdrawal + shortfall = spending + surplus
+  endBalance = startBalance + contributions + surplus - withdrawal + growth
+  ```
 
 ### Output
 
@@ -288,8 +339,10 @@ As input:
 
 ```ts
 {
-  startBalance: 500_000, returnRate: 0.05, inflationRate: 0.03,
-  spending: 60_000, years: 4, startYear: 2026,
+  timeline:    { startYear: 2026, years: 4 },
+  assumptions: { returnRate: 0.05, inflationRate: 0.03 },
+  portfolio:   { startBalance: 500_000 },
+  spending:    { annual: 60_000 },
   flows: [
     { id: "pension", type: "income", source: "pension", amount: 20_000, indexing: "none" },
     { id: "ss", type: "income", source: "socialSecurity", amount: 24_000, indexing: "inflation", fromYear: 2028 },
@@ -313,32 +366,38 @@ exceeds spending here, so there is no surplus, and `firstShortfallYear` is
 ### Validation
 
 Same approach as [validation.md](validation.md): TypeScript types cover the
-shape (`type`, `source`, `indexing`), and `validateProjectionInput` adds a few guard
-checks that throw a `RangeError` naming the flow, e.g.
-`flows[2].amount must be >= 0, got -5`.
+shape (`type`, `source`, `indexing`), and each topic module adds a few guard
+checks for its own group. They throw a `RangeError` whose message names the
+full path, e.g. `flows[2].amount must be >= 0, got -5` or
+`timeline.years must be a whole number in the range 1-150, got 0`.
+
+The existing rules are unchanged apart from the field paths and
+`startBalance`. New and changed rules:
 
 | Field | Rule | Why |
 |---|---|---|
-| `id` | non-empty, unique across flows | Output is keyed by `id`; duplicates would overwrite each other. |
-| `amount` | finite, ≥ 0 | A negative flow would reverse its meaning. |
-| `fromYear`, `toYear` | whole numbers ≥ `startYear`; `fromYear` ≤ `toYear` | A reversed range, or one starting before the projection, is always a mistake. |
-| `indexing` `{ rate }` | > -1 and ≤ 1 | Same as `returnRate`, including the units hint. |
-| `startBalance` | ≥ 0 (was > 0) | Contributions can build a balance from $0. |
+| `flows[i].id` | non-empty, unique across flows | Output is keyed by `id`; duplicates would overwrite each other. |
+| `flows[i].amount` | finite, ≥ 0 | A negative flow would reverse its meaning. |
+| `flows[i].fromYear`, `.toYear` | whole numbers ≥ `timeline.startYear`; `fromYear` ≤ `toYear` | A reversed range, or one starting before the projection, is always a mistake. |
+| `flows[i].indexing` `{ rate }` | > -1 and ≤ 1 | Same as `returnRate`, including the units hint. |
+| `portfolio.startBalance` | ≥ 0 (was > 0) | Contributions can build a balance from $0. |
 
 ## Changes to reference docs
 
 When this stage is implemented:
 
-- **projection.md:** new input (`spending`, `flows`), new output fields, the
-  two-stage structure, the new algorithm and worked example. `annualWithdrawal`
-  is removed, and `depletedInYear` is replaced by `firstShortfallYear`.
-  **Breaking changes.**
-- **validation.md:** flow rules, and `startBalance` relaxed to ≥ 0.
+- **projection.md:** grouped input with `spending` and `flows`, new output
+  fields, the two-stage structure, the new algorithm and worked example.
+  `annualWithdrawal` is removed, and `depletedInYear` is replaced by
+  `firstShortfallYear`. **Breaking changes.**
+- **validation.md:** field paths in rules and messages, flow rules, and
+  `startBalance` relaxed to ≥ 0.
+- **architecture.md:** status becomes Implemented.
 - **README.md:** stage 2 status.
 
 ## Decisions
 
-All accepted on 2026-11-22.
+All accepted: 1–6 on 2026-11-22, 7 on 2026-11-23.
 
 1. **Default `indexing` when it isn't given.** `"none"` is safer for pensions;
    `"inflation"` is right for Social Security.
@@ -370,6 +429,12 @@ All accepted on 2026-11-22.
    `buildSchedule` converts them to projection years
    (`y = calendarYear - startYear + 1`), so the formulas above are unchanged.
    Stage 3 (age) can later add an alternative such as `fromAge`.
+7. **Group the input by topic.** Keep `ProjectionInput` flat, or group it
+   (`timeline`, `assumptions`, `portfolio`, `spending`, `flows`)?
+   *Decision:* group it now. Later stages add accounts, taxes and ages, and a
+   flat input would mix every topic together. This stage is already a breaking
+   change (Decision 3, `startBalance` relaxed), so grouping now avoids a second
+   break later. See [architecture.md](architecture.md#1-input-grouped-by-topic).
 
 ## Testing
 
@@ -379,6 +444,7 @@ All accepted on 2026-11-22.
   - the defaults for `fromYear`, `toYear`, and contribution `indexing`
   - calendar years convert to the right projection years
   - the worked example's schedule table above
+  - `spendingFor` and `flowsFor` on their own
 - `simulate`:
   - the worked example above
   - with no flows, results match the current engine
@@ -386,11 +452,11 @@ All accepted on 2026-11-22.
     except growth
   - income above spending is reinvested as surplus
   - contributions fund a same-year withdrawal
-  - the `income + withdrawal + shortfall = spending` identity holds in years
-    without surplus
+  - both yearly equations hold on every row of every test projection (a
+    shared helper, called from each `simulate` test)
   - a $0 start with contributions builds a balance, and `firstShortfallYear`
     stays `null` while spending is covered
   - `firstShortfallYear` is the first year with `shortfall > 0`, even if the
     balance later recovers
 - Output: `flows` contains every flow's id with the right amount each year.
-- Validation: the rules table above.
+- Validation: the rules table above, with messages naming the full path.

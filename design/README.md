@@ -9,7 +9,9 @@ There are two kinds of doc:
   history.
 - **Stage docs** propose one stage of development: the problem, the design,
   the decisions and why they were made, and the changes it will make to the
-  reference docs. Once a stage is implemented, its changes are merged into the
+  reference docs. Every stage doc follows the checklist in
+  [architecture.md](architecture.md#adding-a-stage-checklist). Once a stage
+  is implemented, its changes are merged into the
   reference docs, and the stage doc stays as the record of why.
 
 Every doc has a status line:
@@ -28,6 +30,7 @@ Reference docs change only once a design is approved.
 |---|---|---|
 | [projection.md](projection.md) | Core engine: inputs, outputs, the yearly algorithm | Implemented |
 | [validation.md](validation.md) | Guard checks on input, and the limits exported for clients | Implemented |
+| [architecture.md](architecture.md) | Engine structure: input groups, schedule builders, year steps, the two yearly equations, and the checklist for adding a stage | Draft (introduced by stage 2) |
 
 ## Roadmap
 
