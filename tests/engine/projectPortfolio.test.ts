@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type ProjectionInput, projectPortfolio } from "@/index";
+import { expectEquationsHold } from "../helpers/equations";
 
 // Worked example from design/projection.md
 const example: ProjectionInput = {
@@ -24,8 +25,15 @@ const withInput = (
     spending: { ...base.spending, ...o.spending },
 });
 
-/** Projects the worked example with the given fields replaced. */
-const project = (o: Overrides = {}) => projectPortfolio(withInput(example, o));
+/**
+ * Projects the worked example with the given fields replaced, and checks the
+ * yearly equations on the result.
+ */
+const project = (o: Overrides = {}) => {
+    const result = projectPortfolio(withInput(example, o));
+    expectEquationsHold(result);
+    return result;
+};
 
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 
@@ -53,7 +61,7 @@ describe("worked example", () => {
         expect(summary.endBalanceReal).toBeCloseTo(934_670.05);
         expect(summary.totalWithdrawn).toBeCloseTo(123_636);
         expect(summary.totalShortfall).toBe(0);
-        expect(summary.depletedInYear).toBeNull();
+        expect(summary.firstShortfallYear).toBeNull();
     });
 });
 
@@ -163,7 +171,7 @@ describe("depletion", () => {
     });
 
     test("summary", () => {
-        expect(summary.depletedInYear).toBe(2);
+        expect(summary.firstShortfallYear).toBe(2);
         expect(summary.endBalance).toBe(0);
         expect(summary.totalWithdrawn).toBe(100);
         expect(summary.totalShortfall).toBeCloseTo(26 + 72.6 + 79.86);
@@ -203,8 +211,8 @@ describe("input validation", () => {
     // starts with the field's full path and includes the value it got
     // (design/validation.md#errors).
     test.each<Case>([
-        ["portfolio", "startBalance", 0],
         ["portfolio", "startBalance", -1],
+        ["portfolio", "startBalance", -0.01],
         ["portfolio", "startBalance", NaN],
         ["portfolio", "startBalance", Infinity],
         ["assumptions", "returnRate", -1],
@@ -231,7 +239,7 @@ describe("input validation", () => {
     });
 
     test.each<Case>([
-        ["portfolio", "startBalance", 0.01],
+        ["portfolio", "startBalance", 0],
         ["assumptions", "returnRate", -0.9999],
         ["assumptions", "returnRate", 1],
         ["assumptions", "inflationRate", -0.9999],
@@ -241,6 +249,34 @@ describe("input validation", () => {
         ["timeline", "years", 150],
     ])("accepts boundary %s.%s = %p", (group, field, value) => {
         expect(run(override(group, field, value))).not.toThrow();
+    });
+
+    test("flows are validated, with their index in the path", () => {
+        const input: ProjectionInput = {
+            ...example,
+            flows: [{ id: "savings", type: "contribution", amount: -5 }],
+        };
+        const call = () => projectPortfolio(input);
+        expect(call).toThrow(RangeError);
+        expect(call).toThrow("flows[0].amount must be >= 0, got -5");
+    });
+
+    test("flow years are checked against the timeline's startYear", () => {
+        const input: ProjectionInput = {
+            ...example,
+            timeline: { startYear: 2030, years: 3 },
+            flows: [{ id: "savings", type: "contribution", amount: 1, fromYear: 2029 }],
+        };
+        expect(() => projectPortfolio(input)).toThrow(/^flows\[0\]\.fromYear .* \(2030\), got 2029$/);
+    });
+
+    test("an invalid timeline is reported before flows that depend on it", () => {
+        const input: ProjectionInput = {
+            ...example,
+            timeline: { startYear: NaN, years: 3 },
+            flows: [{ id: "savings", type: "contribution", amount: 1, fromYear: 2029 }],
+        };
+        expect(() => projectPortfolio(input)).toThrow(/^timeline\.startYear/);
     });
 
     test.each(["returnRate", "inflationRate"] as const)(

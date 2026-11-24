@@ -1,5 +1,5 @@
 // Schedule builder for cash flows (design/cash-flows.md). Used by
-// engine/schedule.ts buildSchedule; simulate doesn't read the schedule yet.
+// engine/schedule.ts buildSchedule.
 import { amountInYear } from "../../core/growth";
 import { rateFor } from "../../core/indexing";
 import type { Timeline, YearRef } from "../timeline/types";

@@ -30,7 +30,7 @@ Reference docs change only once a design is approved.
 |---|---|---|
 | [projection.md](projection.md) | Core engine: inputs, outputs, the yearly algorithm | Implemented |
 | [validation.md](validation.md) | Guard checks on input, and the limits exported for clients | Implemented |
-| [architecture.md](architecture.md) | Engine structure: input groups, schedule builders, year steps, the two yearly equations, and the checklist for adding a stage | Draft (introduced by stage 2) |
+| [architecture.md](architecture.md) | Engine structure: input groups, schedule builders, year steps, the two yearly equations, and the checklist for adding a stage | Implemented (introduced by stage 2) |
 
 ## Roadmap
 
@@ -41,7 +41,7 @@ when that gives a better design. Each stage doc lists any breaking changes.
 |---|---|---|---|
 | 0 | Core projection: compounding, inflation, withdrawals, real vs nominal | [projection.md](projection.md) | Implemented |
 | 1 | Input validation | [validation.md](validation.md) | Implemented |
-| 2 | Cash flows: contributions and income | [cash-flows.md](cash-flows.md) | Draft |
+| 2 | Cash flows: contributions and income | [cash-flows.md](cash-flows.md) | Implemented |
 | 3 | Age: a `birthYear` or `startAge`, so flows can start at an age. Needed for RMDs and Medicare | — | Not started |
 | 4 | Specific income types: Social Security claiming age, pension options | — | Not started |
 | 5 | Spending categories: essential and discretionary, with optional guardrails that cut discretionary spending in bad years | — | Not started |

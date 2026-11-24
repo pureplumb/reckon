@@ -1,8 +1,7 @@
 # Architecture
 
-**Status:** Draft. The [code layout](#code-layout) is implemented. The rest
-is introduced by stage 2 ([cash-flows.md](cash-flows.md)) and becomes
-Implemented when stage 2 is built.
+**Status:** Implemented. Introduced by stage 2
+([cash-flows.md](cash-flows.md)).
 
 How the projection engine is structured so that each stage adds a separate
 piece (an input group, a schedule builder, a year step) instead of growing one
@@ -35,20 +34,21 @@ src/
 │   ├── portfolio/              Portfolio; steps: initialState, grow
 │   ├── spending/               SpendingInput, SpendingSlice, spendingFor; steps: withdrawForSpending
 │   └── flows/                  CashFlow, Contribution, Income, FlowsSlice, flowForYear;
-│                               steps: depositContributions, reinvest
+│                               validateFlows; steps: depositContributions, reinvest
 └── engine/                     connects topics; contains no topic logic
     ├── input.ts                ProjectionInput, composed from topic types
     ├── result.ts               ProjectionYear, ProjectionSummary, ProjectionResult
     ├── validate.ts             validateProjectionInput: calls each topic's checks
     ├── schedule.ts             ScheduleYear, buildSchedule
     ├── simulate.ts             simulate, simulateYear: the fixed step order
-    ├── summary.ts              summarize: the summary from the finished rows
+    ├── summarize.ts            summarize: the summary from the finished rows
     └── project.ts              projectPortfolio
 
 tests/                          mirrors src/
-├── helpers/                    shared fixtures and the yearly-equation check (stage 2)
+├── helpers/                    the yearly-equation check
+├── core/<file>.test.ts
 ├── topics/<topic>/<file>.test.ts
-└── engine/projectPortfolio.test.ts
+└── engine/                     projectPortfolio, simulate, summarize, schedulebuilder
 ```
 
 ### Topic modules
@@ -187,7 +187,7 @@ const buildSchedule = (input: ProjectionInput): ScheduleYear[] =>
   projectionYears(input.timeline).map((y) => ({
     ...y,                                                    // year, calendarYear
     ...spendingFor(input.spending, input.assumptions, y),    // spending
-    ...flowsFor(input.flows ?? [], input.timeline, input.assumptions, y),
+    ...flowForYear(input.flows ?? [], y, input.timeline, input.assumptions.inflationRate),
                                                              // income, contributions, flows
     // stage 6: ...rmdPercentFor(input.household, y), ...returnRatesFor(input.portfolio, y)
   }));
@@ -195,7 +195,7 @@ const buildSchedule = (input: ProjectionInput): ScheduleYear[] =>
 
 **Each builder takes only the groups it uses, plus the `YearRef`**, and
 returns only its own slice, e.g.
-`flowsFor(flows, timeline, assumptions, y): FlowsSlice`. Builders never take
+`flowForYear(flows, y, timeline, inflationRate): FlowsSlice`. Builders never take
 the whole `ProjectionInput`: that type lives in `engine`, and importing it
 would break the [dependency rule](#dependency-rule). Taking only their own
 groups also makes each builder's needs obvious, and its tests build only what

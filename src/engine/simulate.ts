@@ -1,59 +1,70 @@
+import type { Assumptions } from "../topics/assumptions/types";
 import { inflationFactor } from "../core/growth";
+import { type SimState, totalBalance } from "../core/state";
+import { depositContributions, reinvest } from "../topics/flows/steps";
+import { grow, initialState } from "../topics/portfolio/steps";
+import { withdrawForSpending } from "../topics/spending/steps";
 import type { ProjectionInput } from "./input";
 import type { ProjectionResult, ProjectionYear } from "./result";
+import type { ScheduleYear } from "./schedule";
+import { summarize } from "./summarize";
 
-/** The year-by-year balance loop. Expects validated input. */
-export const simulate = (input: ProjectionInput): ProjectionResult => {
-    const startBalance = input.portfolio.startBalance;
-    const returnRate = input.assumptions.returnRate;
-    const inflationRate = input.assumptions.inflationRate;
-    const spending = input.spending.annual;
-    const startYear = input.timeline.startYear;
+/**
+ * Runs one year's steps in the fixed order (architecture.md §3) and builds the
+ * row. Changes `state` in place.
+ */
+export const simulateYear = (
+    state: SimState,
+    s: ScheduleYear,
+    assumptions: Assumptions,
+): ProjectionYear => {
+    const startBalance = totalBalance(state);
 
-    let balance = startBalance;
-    let totalWithdrawn = 0;
-    let totalShortfall = 0;
-    let depletedInYear: number | null = null;
+    // 1. flows: contributions land first, so they can fund this year's spending
+    depositContributions(state, s.contributions);
 
-    const years: ProjectionYear[] = [];
+    // 2. RMDs arrive in stage 6
 
-    // Keep looping after depletion: every year gets a row, and later years
-    // record the unfunded spending as shortfall.
-    for (let year = 1; year <= input.timeline.years; year++) {
-        // Year 1 uses the withdrawal as given; inflation adjustments start in year 2.
-        const target = spending * inflationFactor(inflationRate, year - 1);
-        const withdrawal = Math.min(target, balance);
-        const shortfall = target - withdrawal;
-        const afterDraw = balance - withdrawal;
-        const growth = afterDraw * returnRate;
-        const endBalance = afterDraw + growth;
+    // 3. spending: net against income, withdraw the rest
+    const { withdrawal, shortfall, surplus } = withdrawForSpending(
+        state,
+        s.spending,
+        s.income,
+    );
 
-        totalWithdrawn += withdrawal;
-        totalShortfall += shortfall;
-        if (depletedInYear === null && endBalance <= 0) depletedInYear = year;
+    // 4. flows: reinvest income above spending (Decision 2)
+    reinvest(state, surplus);
 
-        years.push({
-            year,
-            calendarYear: startYear + year - 1,
-            startBalance: balance,
-            withdrawal,
-            shortfall,
-            growth,
-            endBalance,
-            endBalanceReal: endBalance / inflationFactor(inflationRate, year),
-        });
-        balance = endBalance;
-    }
+    // 5. portfolio: grow what's left
+    const growth = grow(state, assumptions.returnRate);
+
+    const endBalance = totalBalance(state);
 
     return {
-        years,
-        summary: {
-            endBalance: balance,
-            endBalanceReal: balance /
-                inflationFactor(inflationRate, input.timeline.years),
-            totalWithdrawn,
-            totalShortfall,
-            depletedInYear,
-        },
+        ...s, // year, calendarYear, spending, income, contributions, flows
+        startBalance,
+        withdrawal,
+        shortfall,
+        surplus,
+        growth,
+        endBalance,
+        endBalanceReal: endBalance /
+            inflationFactor(assumptions.inflationRate, s.year),
     };
+};
+
+/**
+ * The year-by-year balance loop over a built schedule. Expects validated
+ * input. The state is created here and shared with nothing, so this is pure
+ * from the outside.
+ */
+export const simulate = (
+    input: ProjectionInput,
+    schedule: ScheduleYear[],
+): ProjectionResult => {
+    const state = initialState(input.portfolio);
+    const years = schedule.map((s) =>
+        simulateYear(state, s, input.assumptions)
+    );
+    return { years, summary: summarize(years) };
 };

@@ -5,13 +5,9 @@ import type { SpendingInput } from "../topics/spending/types";
 import type { Timeline } from "../topics/timeline/types";
 
 /**
- * Input to projectPortfolio, composed from each topic's fields.
- * Flat for now; stage 2 groups it by topic (design/cash-flows.md, Decision 7).
+ * Input to projectPortfolio, grouped by topic (design/architecture.md).
+ * Each group's type is owned by its topic module.
  */
-//export interface ProjectionInput
-//    extends Timeline, Assumptions, Portfolio, SpendingInput {
-//    flows?: CashFlow[]; // stage 2: not used yet
-//}
 export interface ProjectionInput {
     timeline: Timeline;
     assumptions: Assumptions;

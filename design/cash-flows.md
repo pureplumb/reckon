@@ -1,7 +1,9 @@
 # Stage 2: Cash Flows
 
-**Status:** Draft. All decisions accepted (1–6 on 2026-11-22, 7 on
-2026-11-23).
+**Status:** Implemented. All decisions accepted (1–6 on 2026-11-22, 7 on
+2026-11-23). The reference docs ([projection.md](projection.md),
+[validation.md](validation.md), [architecture.md](architecture.md)) are
+updated; this doc stays as the record of why.
 
 This stage introduces the engine structure described in
 [architecture.md](architecture.md): input grouped by topic, per-topic schedule
