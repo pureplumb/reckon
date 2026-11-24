@@ -1,20 +1,36 @@
 import { describe, expect, test } from "bun:test";
-import { type ProjectionInput, projectPortfolio } from "@/projection";
+import { type ProjectionInput, projectPortfolio } from "@/index";
 
 // Worked example from design/projection.md
 const example: ProjectionInput = {
-    startBalance: 1_000_000,
-    returnRate: 0.05,
-    inflationRate: 0.03,
-    spending: 40_000,
-    years: 3,
-    startYear: 2026,
+    timeline: { startYear: 2026, years: 3 },
+    assumptions: { returnRate: 0.05, inflationRate: 0.03 },
+    portfolio: { startBalance: 1_000_000 },
+    spending: { annual: 40_000 },
 };
+
+type Group = Exclude<keyof ProjectionInput, "flows">;
+type Overrides = { [G in Group]?: Partial<ProjectionInput[G]> };
+
+/** `base` with the given fields replaced, group by group. */
+const withInput = (
+    base: ProjectionInput,
+    o: Overrides = {},
+): ProjectionInput => ({
+    ...base,
+    timeline: { ...base.timeline, ...o.timeline },
+    assumptions: { ...base.assumptions, ...o.assumptions },
+    portfolio: { ...base.portfolio, ...o.portfolio },
+    spending: { ...base.spending, ...o.spending },
+});
+
+/** Projects the worked example with the given fields replaced. */
+const project = (o: Overrides = {}) => projectPortfolio(withInput(example, o));
 
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 
 describe("worked example", () => {
-    const { years, summary } = projectPortfolio(example);
+    const { years, summary } = project();
 
     test.each([
         // year, start, withdrawal, growth, end, endReal
@@ -43,13 +59,11 @@ describe("worked example", () => {
 
 describe("withdrawals and growth", () => {
     test("0% return and 0% inflation: balance drops by exactly the withdrawal", () => {
-        const { years } = projectPortfolio({
-            startBalance: 1_000,
-            returnRate: 0,
-            inflationRate: 0,
-            spending: 100,
-            years: 5,
-            startYear: 2026,
+        const { years } = project({
+            timeline: { years: 5 },
+            assumptions: { returnRate: 0, inflationRate: 0 },
+            portfolio: { startBalance: 1_000 },
+            spending: { annual: 100 },
         });
         expect(years.map((y) => y.endBalance)).toEqual([
             900,
@@ -64,52 +78,50 @@ describe("withdrawals and growth", () => {
     });
 
     test("year 1 withdrawal is not inflated; inflation compounds from year 2", () => {
-        const { years } = projectPortfolio({ ...example, years: 4 });
+        const { years } = project({ timeline: { years: 4 } });
         expect(years[0]!.withdrawal).toBe(40_000);
         expect(years[3]!.withdrawal).toBeCloseTo(40_000 * 1.03 ** 3);
     });
 
     test("withdrawal happens before growth", () => {
-        const { years } = projectPortfolio({ ...example, years: 1 });
+        const { years } = project({ timeline: { years: 1 } });
         expect(years[0]!.growth).toBeCloseTo((1_000_000 - 40_000) * 0.05);
     });
 
     test("no withdrawal: balance compounds at the return rate", () => {
-        const { summary } = projectPortfolio({
-            ...example,
-            spending: 0,
-            years: 10,
+        const { summary } = project({
+            spending: { annual: 0 },
+            timeline: { years: 10 },
         });
         expect(summary.endBalance).toBeCloseTo(1_000_000 * 1.05 ** 10);
         expect(summary.totalWithdrawn).toBe(0);
     });
 
     test("negative return shrinks the balance but never below 0", () => {
-        const { years } = projectPortfolio({
-            ...example,
-            returnRate: -0.5,
-            years: 10,
+        const { years } = project({
+            assumptions: { returnRate: -0.5 },
+            timeline: { years: 10 },
         });
         expect(years[0]!.endBalance).toBeCloseTo(480_000);
         expect(years.every((y) => y.endBalance >= 0)).toBe(true);
     });
 
     test("each year starts with the previous year's end balance", () => {
-        const { years } = projectPortfolio({ ...example, years: 10 });
+        const { years } = project({ timeline: { years: 10 } });
         for (let i = 1; i < years.length; i++) {
             expect(years[i]!.startBalance).toBe(years[i - 1]!.endBalance);
         }
     });
 
     test("real balance divides by cumulative inflation to that year", () => {
-        const { years } = projectPortfolio({ ...example, years: 5 });
+        const { years } = project({ timeline: { years: 5 } });
         years.forEach((y) => {
             expect(y.endBalanceReal).toBeCloseTo(y.endBalance / 1.03 ** y.year);
         });
     });
 
     test("summary totals match the yearly rows", () => {
-        const { years, summary } = projectPortfolio({ ...example, years: 30 });
+        const { years, summary } = project({ timeline: { years: 30 } });
         expect(summary.endBalance).toBe(years.at(-1)!.endBalance);
         expect(summary.endBalanceReal).toBe(years.at(-1)!.endBalanceReal);
         expect(summary.totalWithdrawn).toBeCloseTo(
@@ -120,13 +132,11 @@ describe("withdrawals and growth", () => {
 
 describe("depletion", () => {
     // $100, $60/yr, 10% inflation: targets 60, 66, 72.60, 79.86
-    const { years, summary } = projectPortfolio({
-        startBalance: 100,
-        returnRate: 0,
-        inflationRate: 0.1,
-        spending: 60,
-        years: 4,
-        startYear: 2026,
+    const { years, summary } = project({
+        timeline: { years: 4 },
+        assumptions: { returnRate: 0, inflationRate: 0.1 },
+        portfolio: { startBalance: 100 },
+        spending: { annual: 60 },
     });
 
     test("output always has one row per year", () => {
@@ -170,66 +180,75 @@ describe("depletion", () => {
 
 describe("calendarYear", () => {
     test("set from startYear when given", () => {
-        const { years } = projectPortfolio({ ...example, startYear: 2026 });
+        const { years } = project({ timeline: { startYear: 2026 } });
         expect(years.map((y) => y.calendarYear)).toEqual([2026, 2027, 2028]);
     });
 });
 
 describe("input validation", () => {
-    const run = (overrides: Partial<ProjectionInput>) => () =>
-        projectPortfolio({ ...example, ...overrides });
+    const run = (o: Overrides) => () => project(o);
+
+    // [group, field, value]; the type only allows fields of that group.
+    type Case = {
+        [G in Group]: [G, keyof ProjectionInput[G] & string, number];
+    }[Group];
+    const override = (group: Group, field: string, value: number) =>
+        ({ [group]: { [field]: value } }) as Overrides;
 
     test("valid input does not throw", () => {
         expect(run({})).not.toThrow();
     });
 
     // Each case: the invalid value is rejected with a RangeError whose message
-    // names the field and the value it got (design/validation.md#errors).
-    test.each<[keyof ProjectionInput, number]>([
-        ["startBalance", 0],
-        ["startBalance", -1],
-        ["startBalance", NaN],
-        ["startBalance", Infinity],
-        ["returnRate", -1],
-        ["returnRate", -1.5],
-        ["returnRate", 1.0001],
-        ["returnRate", NaN],
-        ["inflationRate", -1],
-        ["inflationRate", 1.0001],
-        ["inflationRate", NaN],
-        ["spending", -1],
-        ["spending", NaN],
-        ["spending", Infinity],
-        ["years", 0],
-        ["years", 151],
-        ["years", 2.5],
-        ["years", NaN],
-        ["startYear", 2026.5],
-        ["startYear", NaN],
-    ])("rejects %s = %p", (field, value) => {
-        const call = run({ [field]: value });
+    // starts with the field's full path and includes the value it got
+    // (design/validation.md#errors).
+    test.each<Case>([
+        ["portfolio", "startBalance", 0],
+        ["portfolio", "startBalance", -1],
+        ["portfolio", "startBalance", NaN],
+        ["portfolio", "startBalance", Infinity],
+        ["assumptions", "returnRate", -1],
+        ["assumptions", "returnRate", -1.5],
+        ["assumptions", "returnRate", 1.0001],
+        ["assumptions", "returnRate", NaN],
+        ["assumptions", "inflationRate", -1],
+        ["assumptions", "inflationRate", 1.0001],
+        ["assumptions", "inflationRate", NaN],
+        ["spending", "annual", -1],
+        ["spending", "annual", NaN],
+        ["spending", "annual", Infinity],
+        ["timeline", "years", 0],
+        ["timeline", "years", 151],
+        ["timeline", "years", 2.5],
+        ["timeline", "years", NaN],
+        ["timeline", "startYear", 2026.5],
+        ["timeline", "startYear", NaN],
+    ])("rejects %s.%s = %p", (group, field, value) => {
+        const call = run(override(group, field, value));
         expect(call).toThrow(RangeError);
-        expect(call).toThrow(field);
+        expect(call).toThrow(new RegExp(`^${group}\\.${field} must `));
         expect(call).toThrow(`got ${value}`);
     });
 
-    test.each<[keyof ProjectionInput, number]>([
-        ["startBalance", 0.01],
-        ["returnRate", -0.9999],
-        ["returnRate", 1],
-        ["inflationRate", -0.9999],
-        ["inflationRate", 1],
-        ["spending", 0],
-        ["years", 1],
-        ["years", 150],
-    ])("accepts boundary %s = %p", (field, value) => {
-        expect(run({ [field]: value })).not.toThrow();
+    test.each<Case>([
+        ["portfolio", "startBalance", 0.01],
+        ["assumptions", "returnRate", -0.9999],
+        ["assumptions", "returnRate", 1],
+        ["assumptions", "inflationRate", -0.9999],
+        ["assumptions", "inflationRate", 1],
+        ["spending", "annual", 0],
+        ["timeline", "years", 1],
+        ["timeline", "years", 150],
+    ])("accepts boundary %s.%s = %p", (group, field, value) => {
+        expect(run(override(group, field, value))).not.toThrow();
     });
 
     test.each(["returnRate", "inflationRate"] as const)(
         "%s entered as a percent gives the units hint",
         (field) => {
-            expect(run({ [field]: 5 })).toThrow("0.05 means 5%");
+            expect(run({ assumptions: { [field]: 5 } })).toThrow(
+                "0.05 means 5%",
+            );
         },
     );
 });

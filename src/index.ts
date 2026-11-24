@@ -1,7 +1,7 @@
-export function greet(name: string) {
-  return `Hello, ${name}!`;
-}
-
-if (import.meta.main) {
-  console.log(greet("Bun"));
-}
+// Public API. Everything not exported here is internal.
+export { projectPortfolio } from "./engine/project";
+export type { ProjectionInput } from "./engine/input";
+export type { ProjectionResult, ProjectionYear } from "./engine/result";
+export type { CashFlow, Contribution, Income } from "./topics/flows/types";
+export type { Indexing } from "./core/indexing";
+export { LIMITS } from "./core/limits";

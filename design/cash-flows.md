@@ -116,12 +116,13 @@ interface ProjectionInput {
 
 ### A flow's amount in a given year
 
-A flow is active in calendar years `fromYear` to `toYear`. `buildSchedule`
-converts these to 1-based projection years with
-`y = calendarYear - startYear + 1`. In an active projection year `y`:
+A flow is active in calendar years `fromYear` to `toYear`, compared against
+each year's `y.calendarYear` (from
+[`projectionYears`](architecture.md#the-years-to-project)). In an active year,
+with projection year `y.year`:
 
 ```
-value(y) = amount * (1 + g)^(y - 1)
+value(y) = amount * (1 + g)^(y.year - 1)
 ```
 
 where `g` is `inflationRate` for `"inflation"`, 0 for `"none"`, or the given
@@ -175,10 +176,10 @@ interface ScheduleYear {
 function buildSchedule(input: ProjectionInput): ScheduleYear[];
 ```
 
-It combines a slice from each topic's builder
-([architecture.md](architecture.md#2-the-schedule-everything-known-in-advance)):
-`timelineFor` (year, calendar year), `spendingFor` (spending) and `flowsFor`
-(income, contributions, flows). For each year they:
+It takes each year from `projectionYears` (a `YearRef` holding `year` and
+`calendarYear`) and adds a slice from each topic's builder
+([architecture.md](architecture.md#building-the-schedule)): `spendingFor`
+(spending) and `flowsFor` (income, contributions, flows). For each year they:
 1. calculate spending: `spending.annual * (1 + inflationRate)^(year - 1)`
 2. work out each flow's amount: 0 outside `fromYear` to `toYear`, otherwise
    `amount * (1 + g)^(year - 1)` (see
@@ -187,7 +188,7 @@ It combines a slice from each topic's builder
 
    ```ts
    const amounts = Object.fromEntries(
-     flows.map((f) => [f.id, flowAmount(f, year, input)]),
+     flows.map((f) => [f.id, flowAmount(f, y, input)]),
    );
    ```
 
@@ -240,17 +241,12 @@ by year in `simulate`. This stage shapes the code so stage 6 adds accounts
 without restructuring the loop:
 
 - **`simulate` keeps balances in a state object keyed by account**
-  (`SimState`, see [architecture.md](architecture.md#3-simulation-year-steps-in-a-fixed-order)),
-  holding a single account for now:
-
-  ```ts
-  // Stage 2: one account holding the whole portfolio
-  const state: SimState = { accounts: { default: input.portfolio.startBalance } };
-  ```
-
-  In the algorithm below, `balance` means `state.accounts.default`. Output
-  fields such as `startBalance` and `endBalance` are the total across
-  accounts, which today is the one account.
+  (`SimState` in `core/state.ts`; see [Simulation state](#simulation-state)),
+  holding a single `default` account for now. Steps change balances only
+  through `deposit` and `withdrawUpTo`, so stage 6 changes which account those
+  use without touching the steps' callers. Output fields such as
+  `startBalance` and `endBalance` are the total across accounts, which today
+  is the one account.
 - **`ScheduleYear` has room for per-account inputs.** Stage 6 adds, for
   example, each account's return rate and contributions for each year. No
   fields are added now.
@@ -260,36 +256,129 @@ without restructuring the loop:
 
 ### Algorithm
 
+`buildSchedule` is implemented (`src/engine/schedule.ts`). This section
+describes the `simulate` side: how each year's balance changes, using the
+schedule.
+
 All money moves at the **start** of the year, before growth, as in the current
 engine.
 
-Each year runs the stage 2 year steps, in the order set in
-[architecture.md](architecture.md#3-simulation-year-steps-in-a-fixed-order).
-The withdrawal target has moved into the schedule, and netting against income
-and contributions is new:
+#### `projectPortfolio`
 
+```ts
+// engine/project.ts
+export const projectPortfolio = (input: ProjectionInput): ProjectionResult => {
+  validateProjectionInput(input);
+  const schedule = buildSchedule(input);
+  return simulate(input, schedule);
+};
 ```
-balance = portfolio.startBalance
-for s in schedule:
-    // 1. depositContributions
-    balance    = balance + s.contributions
 
-    // 3. withdrawForSpending (step 2, takeRmds, arrives in stage 6)
-    need       = s.spending - s.income
-    withdrawal = min(max(need, 0), balance)
-    shortfall  = max(need, 0) - withdrawal
-    balance    = balance - withdrawal
+#### Simulation state
 
-    // 4. reinvest
-    surplus    = max(-need, 0)        // income above spending; see Decision 2
-    balance    = balance + surplus
+Balances live in a `SimState` keyed by account. Stage 2 has one `default`
+account. The state and its three balance operations are in `core/state.ts`,
+so every topic's year steps can use them without importing from `engine`
+(see the [dependency rule](architecture.md#dependency-rule)):
 
-    // 5. grow
-    growth     = balance * returnRate
-    balance    = balance + growth
+```ts
+// core/state.ts
+export interface SimState {
+  accounts: Record<string, number>;   // balance per account id
+}
 
-    record row: s's fields plus the values above
-    update totals and firstShortfallYear
+export const totalBalance = (state: SimState): number;
+export const deposit = (state: SimState, amount: number): void;          // into "default" until stage 6
+export const withdrawUpTo = (state: SimState, amount: number): number;   // takes at most the balance; returns what it took
+```
+
+`withdrawUpTo` is the only place a withdrawal is capped, which is what keeps
+every balance ≥ 0.
+
+The starting state comes from the portfolio topic:
+
+```ts
+// topics/portfolio/steps.ts
+export const initialState = (portfolio: Portfolio): SimState =>
+  ({ accounts: { default: portfolio.startBalance } });
+```
+
+#### `simulate`
+
+`simulate` creates the state, runs one year per schedule row, then builds the
+summary from the rows:
+
+```ts
+// engine/simulate.ts
+export const simulate = (
+  input: ProjectionInput,
+  schedule: ScheduleYear[],
+): ProjectionResult => {
+  const state = initialState(input.portfolio);
+  const years = schedule.map((s) => simulateYear(state, s, input.assumptions));
+  return { years, summary: summarize(years) };
+};
+```
+
+Steps change `state` in place, but only inside `simulate`: it creates the
+state and shares it with nothing, so `simulate` is still pure from the outside.
+
+#### One year
+
+`simulateYear` calls the year steps in the order set in
+[architecture.md](architecture.md#3-simulation-year-steps-in-a-fixed-order)
+and assembles the row. It contains no topic logic itself:
+
+```ts
+// engine/simulate.ts
+const simulateYear = (
+  state: SimState,
+  s: ScheduleYear,
+  assumptions: Assumptions,
+): ProjectionYear => {
+  const startBalance = totalBalance(state);
+
+  depositContributions(state, s.contributions);                    // 1. flows
+  // 2. takeRmds arrives in stage 6
+  const { withdrawal, shortfall, surplus } =
+    withdrawForSpending(state, s.spending, s.income);              // 3. spending
+  reinvest(state, surplus);                                        // 4. flows
+  const growth = grow(state, assumptions.returnRate);              // 5. portfolio
+
+  const endBalance = totalBalance(state);
+  return {
+    ...s,   // year, calendarYear, spending, income, contributions, flows
+    startBalance, withdrawal, shortfall, surplus, growth, endBalance,
+    endBalanceReal: endBalance / inflationFactor(assumptions.inflationRate, s.year),
+  };
+};
+```
+
+#### The year steps
+
+Each step lives in the topic that owns it, takes only what it needs, and
+returns only the values recorded in the row:
+
+| Order | Step | File | Signature | Does |
+|---|---|---|---|---|
+| 1 | `depositContributions` | `topics/flows/steps.ts` | `(state, contributions) => void` | `deposit(state, contributions)` |
+| 3 | `withdrawForSpending` | `topics/spending/steps.ts` | `(state, spending, income) => { withdrawal, shortfall, surplus }` | see below |
+| 4 | `reinvest` | `topics/flows/steps.ts` | `(state, surplus) => void` | `deposit(state, surplus)` |
+| 5 | `grow` | `topics/portfolio/steps.ts` | `(state, returnRate) => number` | multiplies each account by `1 + returnRate`; returns the total growth |
+
+`withdrawForSpending` nets spending against income:
+
+```ts
+// topics/spending/steps.ts
+export const withdrawForSpending = (state: SimState, spending: number, income: number) => {
+  const need = spending - income;
+  const withdrawal = need > 0 ? withdrawUpTo(state, need) : 0;
+  return {
+    withdrawal,
+    shortfall: Math.max(need, 0) - withdrawal,
+    surplus: Math.max(-need, 0),   // income above spending; see Decision 2
+  };
+};
 ```
 
 - Contributions made in a year can fund that year's withdrawal, because they
@@ -297,35 +386,93 @@ for s in schedule:
 - Start-of-year contributions earn that year's full return. That's the
   generous assumption for money coming in, just as start-of-year withdrawals
   are the cautious one for money going out.
-- Every year satisfies the two equations in
-  [architecture.md](architecture.md#4-two-equations-every-year), with
-  `taxes = 0` and `reinvested = surplus`:
+- `shortfall` is exactly 0 when spending is covered (the withdrawal equals the
+  need), so `shortfall > 0` is a reliable test with no floating-point noise.
+- After the balance reaches 0, every step still runs: `withdrawUpTo` returns
+  0, the full need becomes shortfall, and later contributions or surplus can
+  rebuild the balance.
 
-  ```
-  income + withdrawal + shortfall = spending + surplus
-  endBalance = startBalance + contributions + surplus - withdrawal + growth
-  ```
+#### Summary
+
+The summary is calculated from the finished rows, so the rows are the only
+source of truth and there are no running totals to keep in step:
+
+```ts
+// engine/summary.ts
+export const summarize = (years: ProjectionYear[]): ProjectionSummary => {
+  const last = years.at(-1)!;
+  const total = (f: (y: ProjectionYear) => number) => years.reduce((t, y) => t + f(y), 0);
+  return {
+    endBalance: last.endBalance,
+    endBalanceReal: last.endBalanceReal,
+    totalWithdrawn: total((y) => y.withdrawal),
+    totalShortfall: total((y) => y.shortfall),
+    totalIncome: total((y) => y.income),
+    totalContributions: total((y) => y.contributions),
+    firstShortfallYear: years.find((y) => y.shortfall > 0)?.year ?? null,
+  };
+};
+```
+
+`years` is never empty, because validation requires `timeline.years ≥ 1`.
+
+#### Equations
+
+Every year satisfies the two equations in
+[architecture.md](architecture.md#4-two-equations-every-year), with
+`taxes = 0` and `reinvested = surplus`:
+
+```
+income + withdrawal + shortfall = spending + surplus
+endBalance = startBalance + contributions + surplus - withdrawal + growth
+```
+
+A shared test helper checks both on every row of every `simulate` test.
+
+#### Change from the current engine
+
+`firstShortfallYear` replaces `depletedInYear` (Decision 4), and the two can
+differ by one year. With $100, $50 a year and 0% return, year 2 withdraws the
+last $50 and ends at $0 with spending fully covered: `depletedInYear` is 2,
+but the first shortfall is in year 3, so `firstShortfallYear` is 3. The "no
+flows matches the current engine" test compares every other field, and
+expects this difference.
 
 ### Output
 
-New fields on `ProjectionYear`:
+`ProjectionYear` is the schedule row plus the values `simulate` adds, so a new
+schedule slice in a later stage reaches the output automatically:
 
 ```ts
-spending: number;               // inflation-adjusted spending target
-income: number;                 // total income this year
-contributions: number;          // total contributions this year
-surplus: number;                // income above spending, reinvested
-flows: Record<string, number>;  // each flow's amount this year, keyed by id
+// engine/result.ts
+export interface ProjectionYear extends ScheduleYear {
+  // from the schedule: year, calendarYear, spending, income, contributions, flows
+  startBalance: number;
+  withdrawal: number;     // taken from the portfolio for spending
+  shortfall: number;      // spending not covered by income or withdrawals
+  surplus: number;        // income above spending, reinvested
+  growth: number;
+  endBalance: number;     // nominal
+  endBalanceReal: number; // in year-0 dollars
+}
+
+export interface ProjectionSummary {
+  endBalance: number;
+  endBalanceReal: number;
+  totalWithdrawn: number;
+  totalShortfall: number;
+  totalIncome: number;              // new
+  totalContributions: number;       // new
+  firstShortfallYear: number | null; // replaces depletedInYear; see Decision 4
+}
+
+export interface ProjectionResult {
+  years: ProjectionYear[];
+  summary: ProjectionSummary;
+}
 ```
 
-`withdrawal` keeps its meaning: money taken out of the portfolio. `shortfall`
-becomes spending not covered by income or withdrawals.
-
-New fields on `summary`: `totalIncome`, `totalContributions`.
-
-`summary.depletedInYear` is replaced by `firstShortfallYear: number | null`:
-the first year spending wasn't fully covered (`shortfall > 0`), or `null` if
-it always was (see Decision 4).
+`withdrawal` keeps its meaning: money taken out of the portfolio.
 
 ### Worked example
 
@@ -426,8 +573,8 @@ All accepted: 1–6 on 2026-11-22, 7 on 2026-11-23.
    *Decision:* calendar years. `startYear` is required, so they are always
    available. They match how people think ("Social Security from 2028"), and a
    flow's dates stay correct if the projection's `startYear` changes.
-   `buildSchedule` converts them to projection years
-   (`y = calendarYear - startYear + 1`), so the formulas above are unchanged.
+   Each year's `YearRef` carries its calendar year, so flows are compared
+   against it directly and the growth formula still uses the projection year.
    Stage 3 (age) can later add an alternative such as `fromAge`.
 7. **Group the input by topic.** Keep `ProjectionInput` flat, or group it
    (`timeline`, `assumptions`, `portfolio`, `spending`, `flows`)?
@@ -442,18 +589,30 @@ All accepted: 1–6 on 2026-11-22, 7 on 2026-11-23.
   - a flow is 0 outside `fromYear` to `toYear`
   - each indexing mode grows as specified
   - the defaults for `fromYear`, `toYear`, and contribution `indexing`
-  - calendar years convert to the right projection years
+  - `projectionYears` pairs each projection year with the right calendar year
+  - a flow is active exactly from its `fromYear` to its `toYear`, as calendar
+    years
   - the worked example's schedule table above
   - `spendingFor` and `flowsFor` on their own
+- Year steps and state, each on its own:
+  - `withdrawUpTo` never takes more than the balance, and returns what it took
+  - `withdrawForSpending`: need covered, need partly covered (shortfall),
+    income above spending (surplus, no withdrawal)
+  - `grow` returns the growth and applies it to every account
+- `summarize`: totals equal the sums of the rows; `firstShortfallYear` is the
+  first row with `shortfall > 0`, or `null`
 - `simulate`:
   - the worked example above
-  - with no flows, results match the current engine
+  - with no flows, results match the current engine, except
+    `firstShortfallYear` (see
+    [Change from the current engine](#change-from-the-current-engine))
   - income equal to spending means no withdrawal and no change to the balance
     except growth
   - income above spending is reinvested as surplus
   - contributions fund a same-year withdrawal
   - both yearly equations hold on every row of every test projection (a
-    shared helper, called from each `simulate` test)
+    shared helper in `tests/helpers/`, called from each `simulate` test)
+  - after depletion, later contributions or surplus rebuild the balance
   - a $0 start with contributions builds a balance, and `firstShortfallYear`
     stays `null` while spending is covered
   - `firstShortfallYear` is the first year with `shortfall > 0`, even if the

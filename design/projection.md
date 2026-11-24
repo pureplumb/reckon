@@ -21,24 +21,47 @@ etc.) are listed in the [roadmap](README.md#roadmap).
 ## API
 
 ```ts
-// src/projection/index.ts
+// src/index.ts (public API); implemented in src/engine/project.ts
 export function projectPortfolio(input: ProjectionInput): ProjectionResult;
 ```
 
 ### Input
 
+Grouped by topic; each group is defined by its topic module (see
+[architecture.md](architecture.md#code-layout)).
+
 ```ts
 interface ProjectionInput {
-  startBalance: number;     // > 0
-  returnRate: number;       // nominal annual return, e.g. 0.05
-  inflationRate: number;    // annual, e.g. 0.03
-  annualWithdrawal: number; // year-1 amount in today's dollars, >= 0
-  years: number;            // integer >= 1
-  startYear: number;        // calendar year of year 1
+  timeline: {
+    startYear: number;      // calendar year of year 1
+    years: number;          // whole number, 1 to 150
+  };
+  assumptions: {
+    returnRate: number;     // nominal annual return, e.g. 0.05
+    inflationRate: number;  // annual, e.g. 0.03
+  };
+  portfolio: {
+    startBalance: number;   // > 0
+  };
+  spending: {
+    annual: number;         // year-1 amount in today's dollars, >= 0
+  };
+  flows?: CashFlow[];       // stage 2, not used yet; see cash-flows.md
 }
 ```
 
 Allowed ranges for each field are in [validation.md](validation.md#rules).
+
+Example (the worked example below):
+
+```ts
+projectPortfolio({
+  timeline: { startYear: 2026, years: 3 },
+  assumptions: { returnRate: 0.05, inflationRate: 0.03 },
+  portfolio: { startBalance: 1_000_000 },
+  spending: { annual: 40_000 },
+});
+```
 
 ### Output
 
@@ -70,11 +93,12 @@ interface ProjectionResult {
 
 Withdrawals happen at the **start** of each year, before growth. This is the
 conservative convention: the money you spend doesn't earn that year's return.
+The loop is in `src/engine/simulate.ts`.
 
 ```
-balance = startBalance
-for year in 1..years:
-    target     = annualWithdrawal * (1 + inflationRate)^(year - 1)
+balance = portfolio.startBalance
+for year in 1..timeline.years:
+    target     = spending.annual * (1 + inflationRate)^(year - 1)
     withdrawal = min(target, balance)
     shortfall  = target - withdrawal
     afterDraw  = balance - withdrawal
@@ -86,17 +110,17 @@ for year in 1..years:
 
 - Year 1 uses the withdrawal as given. Inflation adjustments start in year 2.
 - Once the balance reaches 0, the loop keeps running rather than exiting
-  early, so the output always has `years` rows. `depletedInYear` marks the
+  early, so the output always has `timeline.years` rows. `depletedInYear` marks the
   first year the balance hit 0.
   - In later years the balance, withdrawal and growth are 0, and `shortfall`
     equals the full inflation-adjusted target: the spending that went unfunded.
   - Keeping every year calculated leaves room for future extensions (income
     sources, taxes, RMDs) that still apply after the portfolio is empty.
 - A negative return can shrink the balance but never makes it negative.
-- With `annualWithdrawal: 0` the balance simply compounds:
+- With `spending.annual: 0` the balance simply compounds:
   `startBalance * (1 + returnRate)^years`. Because validation requires
-  `startBalance > 0` and `returnRate > -1`, the balance can only reach 0
-  through withdrawals.
+  `portfolio.startBalance > 0` and `assumptions.returnRate > -1`, the balance
+  can only reach 0 through withdrawals.
 
 ### Worked example
 
@@ -110,7 +134,8 @@ $1,000,000, 5% return, 3% inflation, $40,000 withdrawal:
 
 ## Testing
 
-Tests go in `tests/projection/`. Validation tests are listed in
+Tests go in `tests/engine/projectPortfolio.test.ts`; code layout is in
+[architecture.md](architecture.md#code-layout). Validation tests are listed in
 [validation.md](validation.md#testing).
 - With 0% return and 0% inflation the balance drops by exactly the withdrawal
   each year.

@@ -62,8 +62,9 @@ interface Contribution extends FlowBase {
 }
 ```
 
-Modules: `accounts.ts` (accounts, withdrawal order) and `tax.ts` (taxes,
-RMDs), per [architecture.md](architecture.md#topic-modules).
+Topic folders: `topics/accounts/` (accounts, withdrawal order) and
+`topics/tax/` (taxes, RMDs), per
+[architecture.md](architecture.md#topic-modules).
 
 ### What goes in the schedule and what goes in `simulate`
 
