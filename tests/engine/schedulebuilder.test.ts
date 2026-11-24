@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildSchedule } from "@/engine/schedule";
 import type { CashFlow, ProjectionInput } from "@/index";
 
-// Worked example from design/cash-flows.md
+// Worked example from design/projection.md
 const pension: CashFlow = {
     id: "pension",
     type: "income",
@@ -39,7 +39,7 @@ const noFlows: ProjectionInput = { ...example, flows: undefined };
 describe("worked example", () => {
     const schedule = buildSchedule(example);
 
-    // The schedule table in design/cash-flows.md
+    // The schedule table in design/projection.md
     test.each([
         // year, calendar, spending, pension, ss, savings, income, contributions
         [1, 2026, 60_000, 20_000, 0, 10_000, 20_000, 10_000],

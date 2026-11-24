@@ -1,7 +1,7 @@
 # Stage 6: Accounts and Taxes
 
 **Status:** Draft. An outline to record the ideas so far; the decisions at the
-end are open. Depends on stage 2 ([cash-flows.md](cash-flows.md)) and stage 3
+end are open. Depends on stage 2 (cash flows; see [decisions.md](../decisions.md#stage-2-cash-flows)) and stage 3
 (age).
 
 Replaces the single portfolio balance with several **accounts** (traditional
@@ -34,7 +34,7 @@ whatever it holds. Allocation inside an account is out of scope (see below).
 
 ### Input
 
-Following [architecture.md](architecture.md#1-input-grouped-by-topic), this
+Following [architecture.md](../architecture.md#1-input-grouped-by-topic), this
 stage changes the `portfolio` group and adds a `tax` group:
 
 ```ts
@@ -64,12 +64,12 @@ interface Contribution extends FlowBase {
 
 Topic folders: `topics/accounts/` (accounts, withdrawal order) and
 `topics/tax/` (taxes, RMDs), per
-[architecture.md](architecture.md#topic-modules).
+[architecture.md](../architecture.md#topic-modules).
 
 ### What goes in the schedule and what goes in `simulate`
 
 Following the rule in
-[architecture.md](architecture.md#2-the-schedule-everything-known-in-advance):
+[architecture.md](../architecture.md#2-the-schedule-everything-known-in-advance):
 anything known in advance goes in `buildSchedule`; anything that depends on
 the portfolio goes in `simulate`.
 
@@ -89,7 +89,7 @@ The RMD row shows the split: the schedule holds the **percentage**, and
 `SimState.accounts`, introduced with a single account in stage 2, now holds
 every account. This stage adds one year step and extends two others, in the
 order set in
-[architecture.md](architecture.md#3-simulation-year-steps-in-a-fixed-order):
+[architecture.md](../architecture.md#3-simulation-year-steps-in-a-fixed-order):
 
 | Order | Step | Change in this stage |
 |---|---|---|
@@ -106,7 +106,7 @@ and the amount withdrawn depends on the tax).
 ### Equations
 
 Both yearly equations in
-[architecture.md](architecture.md#4-two-equations-every-year) gain terms:
+[architecture.md](../architecture.md#4-two-equations-every-year) gain terms:
 
 ```
 income + withdrawals + shortfall = spending + taxes + reinvested
@@ -125,7 +125,7 @@ still only unfunded spending.
 
 - Each row gains per-account balances and withdrawals, keyed by account id.
   This is the point to group row fields (`row.balances`, `row.cash`), per
-  [architecture.md](architecture.md#5-output).
+  [architecture.md](../architecture.md#5-output).
 - `startBalance`, `endBalance` and `endBalanceReal` stay, as totals across
   accounts.
 - New: taxes paid per year and in total, and RMDs per year.

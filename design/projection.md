@@ -218,6 +218,15 @@ Year 3 income is the $20,000 pension plus $25,461.60 Social Security
 ($24,000 × 1.03²). There is no surplus or shortfall, so `firstShortfallYear`
 is `null`.
 
+The schedule `buildSchedule` produces for it, before any balance is known:
+
+| Year | Calendar | Spending  | pension   | ss        | savings   | Income    | Contributions |
+|------|----------|-----------|-----------|-----------|-----------|-----------|---------------|
+| 1    | 2026     | 60,000.00 | 20,000.00 | 0.00      | 10,000.00 | 20,000.00 | 10,000.00     |
+| 2    | 2027     | 61,800.00 | 20,000.00 | 0.00      | 10,000.00 | 20,000.00 | 10,000.00     |
+| 3    | 2028     | 63,654.00 | 20,000.00 | 25,461.60 | 0.00      | 45,461.60 | 0.00          |
+| 4    | 2029     | 65,563.62 | 20,000.00 | 26,225.45 | 0.00      | 46,225.45 | 0.00          |
+
 Without flows: $1,000,000, 5% return, 3% inflation, $40,000 spending:
 
 | Year | Start        | Withdrawal | Growth    | End          | End (real) |
@@ -236,7 +245,7 @@ Without flows: $1,000,000, 5% return, 3% inflation, $40,000 spending:
   last $50 with spending covered, so the old field was 2 and the new one is 3.
 - `portfolio.startBalance` may now be 0.
 
-The reasons are in [cash-flows.md](cash-flows.md#decisions).
+The reasons are in [decisions.md](decisions.md#stage-2-cash-flows).
 
 ## Testing
 

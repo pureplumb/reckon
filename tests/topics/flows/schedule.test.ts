@@ -3,7 +3,7 @@ import type { CashFlow } from "@/topics/flows/types";
 import { amounts as flowAmounts, flowAmount } from "@/topics/flows/schedule";
 import { projectionYears } from "@/topics/timeline/schedule";
 
-// Flows from the worked example in design/cash-flows.md
+// Flows from the worked example in design/projection.md
 const timeline = { startYear: 2026, years: 4 };
 const inflationRate = 0.03;
 const years = projectionYears(timeline);

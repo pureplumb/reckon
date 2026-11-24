@@ -46,7 +46,7 @@ const income = (
     ...range,
 });
 
-// Worked example from design/cash-flows.md
+// Worked example from design/projection.md
 describe("worked example", () => {
     const { years, summary } = run({
         timeline: { startYear: 2026, years: 4 },

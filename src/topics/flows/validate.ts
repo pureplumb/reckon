@@ -3,7 +3,7 @@ import type { Timeline } from "../timeline/types";
 import type { CashFlow } from "./types";
 
 /**
- * Checks each flow (design/cash-flows.md#validation). Takes the timeline as an
+ * Checks each flow (design/validation.md#rules). Takes the timeline as an
  * argument for the year checks, so it must run after validateTimeline.
  */
 export const validateFlows = (flows: CashFlow[], timeline: Timeline): void => {

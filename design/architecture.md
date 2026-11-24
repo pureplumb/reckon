@@ -1,7 +1,7 @@
 # Architecture
 
-**Status:** Implemented. Introduced by stage 2
-([cash-flows.md](cash-flows.md)).
+**Status:** Implemented. Introduced by stage 2; the reasons are in
+[decisions.md](decisions.md#stage-2-cash-flows).
 
 How the projection engine is structured so that each stage adds a separate
 piece (an input group, a schedule builder, a year step) instead of growing one
@@ -101,10 +101,10 @@ There is no single `types.ts` for the whole library:
 - **`engine`** composes them:
 
   ```ts
-  // engine/input.ts (stage 2 groups it by topic)
+  // engine/input.ts
   interface ProjectionInput {
     timeline: Timeline; assumptions: Assumptions; portfolio: Portfolio;
-    spending: Spending; flows?: CashFlow[];
+    spending: SpendingInput; flows?: CashFlow[];
   }
 
   // engine/schedule.ts
@@ -151,6 +151,9 @@ interface ProjectionInput {
 schedule; anything that depends on the portfolio goes in `simulate`. The
 schedule holds the planned amounts, and `simulate` can adjust them as the
 portfolio changes.
+
+The split lets builders be tested without any balance calculation, and lets
+Monte Carlo (stage 7) build the schedule once and simulate it many times.
 
 ### The years to project
 
@@ -262,8 +265,8 @@ the finished rows (`summarize`), with no running totals.
 | 4 | `reinvest` | flows | 2 | Puts income above spending (surplus) back in. Stage 6: also excess RMDs |
 | 5 | `grow` | portfolio | 2 | Applies the return and returns the growth. Stage 6: per account |
 
-Stage 2's exact signatures and code are in
-[cash-flows.md](cash-flows.md#the-year-steps).
+Stage 2's per-year algorithm is in
+[projection.md](projection.md#algorithm).
 
 **The order is part of the design.** Each stage doc says where its steps go
 and why. Steps are called directly in this order: no plugin or middleware
@@ -312,7 +315,8 @@ endBalance = startBalance + contributions + reinvested - withdrawals + growth
 
 ## Adding a stage: checklist
 
-Each stage doc must say:
+A stage doc is a draft in `design/drafts/` (see
+[README.md](README.md#how-these-docs-work)). Each must say:
 
 1. **Code:** which topic folder it adds or extends, and which files.
 2. **Input:** which group it adds, or which fields it adds inside a group.
@@ -324,6 +328,15 @@ Each stage doc must say:
 6. **Equations:** how it changes the two yearly equations.
 7. **Output:** new fields on rows and the summary.
 8. **Breaking changes**, if any.
+9. **Decisions:** each open question, the options, and the choice once made.
+
+When the stage is implemented:
+
+- Merge its design into the reference docs, so they match the code.
+- Condense the draft into an entry in [decisions.md](decisions.md): the
+  problem, the decisions with the options rejected, and breaking changes.
+  Note the commit holding the full draft.
+- Delete the draft and update the roadmap in [README.md](README.md).
 
 ## Not doing
 

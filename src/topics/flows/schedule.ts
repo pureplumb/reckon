@@ -1,4 +1,4 @@
-// Schedule builder for cash flows (design/cash-flows.md). Used by
+// Schedule builder for cash flows (design/projection.md#input). Used by
 // engine/schedule.ts buildSchedule.
 import { amountInYear } from "../../core/growth";
 import { rateFor } from "../../core/indexing";
