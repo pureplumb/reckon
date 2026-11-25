@@ -26,6 +26,10 @@ export const simulateYear = (
     // 2. RMDs arrive in stage 6
 
     // 3. spending: net against income, withdraw the rest
+    // This will be a bigger stage:
+    //  - taxes (household info)
+    //  - medicare (household info)
+    //  - irmaas (household info)
     const { withdrawal, shortfall, surplus } = withdrawForSpending(
         state,
         s.spending,

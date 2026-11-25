@@ -12,5 +12,6 @@ export const validateProjectionInput = (input: ProjectionInput): void => {
     validateSpending(input.spending);
     validateTimeline(input.timeline);
     // After the timeline: flow years are checked against timeline.startYear.
+    // validateHousehold()
     validateFlows(input.flows ?? [], input.timeline);
 };

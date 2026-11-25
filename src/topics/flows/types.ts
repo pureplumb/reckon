@@ -6,6 +6,9 @@ export interface FlowBase {
     amount: number; // >= 0, in year-1 (today's) dollars; see Decision 5
     fromYear?: number; // first active calendar year, inclusive; default: startYear; see Decision 6
     toYear?: number; // last active calendar year, inclusive; default: last projection year
+    person?: string; // id of the person the flow belongs to; none = joint; see Decisions 4 and 9
+    fromAge?: number; // first active age of `person`, inclusive; instead of fromYear
+    toAge?: number; // last active age of `person`, inclusive; instead of toYear
 }
 
 export interface Contribution extends FlowBase {
