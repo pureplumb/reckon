@@ -5,7 +5,7 @@ import type { Household } from "./types";
 const { min, max } = LIMITS.age;
 
 /**
- * Checks the household (design/drafts/household.md#validation). Takes
+ * Checks the household (design/validation.md#rules). Takes
  * `startYear` for the birth-year check, so it must run after validateTimeline.
  */
 export const validateHousehold = (

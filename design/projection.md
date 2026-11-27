@@ -1,13 +1,14 @@
 # Projection Engine
 
-**Status:** Implemented (through stage 2, cash flows). Input is checked first;
+**Status:** Implemented (through stage 3, household and age). Input is checked first;
 see [validation.md](validation.md). The engine's structure is in
 [architecture.md](architecture.md).
 
 Projects a retirement portfolio year by year. Given a starting balance, rate of
-return, inflation rate, annual spending, and optional cash flows (income and
-contributions), it shows how the portfolio performs over a number of years.
-Later stages (age, accounts, taxes, etc.) are listed in the
+return, inflation rate, annual spending, optional cash flows (income and
+contributions) and an optional household (the people the plan is for, so
+flows can start or stop at an age), it shows how the portfolio performs over
+a number of years. Later stages (accounts, taxes, etc.) are listed in the
 [roadmap](README.md#roadmap).
 
 ## Principles
@@ -55,6 +56,14 @@ interface ProjectionInput {
     annual: number;         // year-1 amount in today's dollars, >= 0; grows with inflation
   };
   flows?: CashFlow[];       // income and contributions
+  household?: {
+    people: Person[];       // 1 or 2
+  };
+}
+
+interface Person {
+  id: string;               // unique; referenced by a flow's `person`; keys `ages`
+  birthYear: number;        // calendar year
 }
 
 type Indexing = "inflation" | "none" | { rate: number };
@@ -64,6 +73,9 @@ interface FlowBase {
   amount: number;        // >= 0, in year-1 (today's) dollars
   fromYear?: number;     // first active calendar year, inclusive; default: startYear
   toYear?: number;       // last active calendar year, inclusive; default: last projection year
+  person?: string;       // id of the person the flow belongs to; none = joint
+  fromAge?: number;      // first active age of `person`, inclusive; instead of fromYear
+  toAge?: number;        // last active age of `person`, inclusive; instead of toYear
 }
 
 interface Contribution extends FlowBase {
@@ -87,6 +99,45 @@ its amount is `amount * (1 + g)^(year - 1)`, where `g` is `inflationRate` for
 `"inflation"`, 0 for `"none"`, or the given rate. Like `spending`, it grows
 from year 1, so a flow starting in year 10 with `"inflation"` pays `amount` in
 today's dollars. Outside its active years it is 0.
+
+### Household and age
+
+A person's **age** in a year is the age they reach during that calendar
+year: `calendarYear - birthYear`. The engine works in whole years (the IRS
+convention for RMD ages); birth months are out of scope.
+
+A flow can be dated by age instead of calendar year. `fromAge` and `toAge`
+are converted to calendar years with `birthYear + age` for the flow's
+`person`, and then the flow behaves exactly like one dated by year: the same
+active-years check, and growth still from year 1. With one person in the
+household, `person` may be left out and defaults to them; with two it's
+required for an age.
+
+- A `fromAge` before the projection starts is normal ("my pension started at
+  60"): the flow is active from year 1.
+- A flow without `person` belongs to the household jointly and is dated with
+  `fromYear`/`toYear`.
+- Ages and years can be mixed: `fromAge` with `toYear`, or `fromYear` with
+  `toAge`.
+
+Pat (born 1960) and Sam (born 1963), `startYear: 2026`:
+
+```ts
+household: { people: [{ id: "pat", birthYear: 1960 }, { id: "sam", birthYear: 1963 }] },
+flows: [
+  { id: "pat-ss", type: "income", source: "socialSecurity",           // from 2027
+    amount: 32_000, indexing: "inflation", person: "pat", fromAge: 67 },
+  { id: "pat-pension", type: "income", source: "pension",             // already started: year 1 on
+    amount: 18_000, indexing: "none", person: "pat", fromAge: 60 },
+  { id: "sam-401k", type: "contribution",                             // 2026–2028
+    amount: 23_000, person: "sam", toAge: 65 },
+  { id: "rental", type: "income", source: "other",                    // joint, from 2030
+    amount: 12_000, indexing: "inflation", fromYear: 2030 },
+],
+```
+
+The 2027 row has `ages: { pat: 67, sam: 64 }`. With no household, `ages` is
+`{}`.
 
 Example (the worked example below):
 
@@ -117,6 +168,7 @@ interface ProjectionYear {
   income: number;          // sum of active income flows
   contributions: number;   // sum of active contribution flows
   flows: Record<string, number>; // each flow's amount, keyed by id (0 when inactive)
+  ages: Record<string, number>;  // each person's age this year, keyed by id ({} with no household)
   // from the simulation
   startBalance: number;
   withdrawal: number;      // taken from the portfolio for spending
@@ -148,8 +200,8 @@ interface ProjectionResult {
 The engine runs in two stages (see [architecture.md](architecture.md)):
 
 1. **`buildSchedule`** (`src/engine/schedule.ts`) works out everything fixed by
-   the input, one row per year: the year, the spending target, and each flow's
-   amount with the income and contribution totals.
+   the input, one row per year: the year, the spending target, each flow's
+   amount with the income and contribution totals, and each person's age.
 2. **`simulate`** (`src/engine/simulate.ts`) walks the schedule with the
    balance, running each year's steps in a fixed order, then calculates the
    summary from the finished rows.
@@ -263,5 +315,8 @@ tests are listed in [validation.md](validation.md#testing).
   short year.
 - Every projection in both files is checked against the two yearly equations
   by `tests/helpers/equations.ts`.
+- `tests/engine/schedulebuilder.test.ts` also covers the household: each
+  row's `ages`, and a couple's age-dated flows resolved through
+  `buildSchedule`.
 - Each schedule builder, year step and `summarize` is tested on its own under
   `tests/core/`, `tests/topics/` and `tests/engine/`.

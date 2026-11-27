@@ -11,6 +11,83 @@ that was condensed away.
 
 ---
 
+## Stage 3: Household and age
+
+Accepted and implemented 2026-11-26, following the draft's leanings. Full
+stage doc: `git show 4f3bc2c:design/drafts/household.md`.
+
+### Problem
+
+A retirement plan is mostly described in ages ("retire at 62", "Social
+Security at 70", "RMDs from 73"), but the engine had only calendar years, so
+the caller worked out every date. For a couple each person has their own age,
+Social Security and accounts, so a single `birthYear` isn't enough.
+
+The household is **its own input group**, not part of `portfolio`: most of its
+users aren't portfolio code (flows, and later tax, Medicare, IRMAA and RMDs),
+and stage 6 accounts will name their owner, so the dependency runs from the
+portfolio to the household.
+
+### Decisions
+
+1. **`birthYear` or `startAge`.** *Chosen:* `birthYear`. It's a fixed fact,
+   so it stays right when `startYear` changes (the same reason stage 2 chose
+   calendar years for `fromYear`). A `startAge` would need editing every time
+   the plan is re-run in a new year.
+2. **Single-person shorthand** (`household: { birthYear }`). *Chosen:* always
+   `people: [...]`. One shape is simpler to validate and document, and adding
+   a spouse doesn't change it.
+3. **Required or optional `household`.** *Chosen:* optional, required only
+   when a flow uses an age. Required would break every existing input while
+   nothing else in stage 3 needs it. Revisit in stage 6 (RMDs, taxes).
+4. **Default `person`.** *Chosen:* with one person, an age-dated flow may
+   leave out `person`; with two it must name one. Adding a spouse then makes
+   those flows invalid, which is the right moment to decide whose they are.
+5. **How the flows builder gets ages.** Options: (a) pass each row's `ages`
+   and compare per year; (b) pass birth years and convert
+   `fromYear = birthYear + fromAge`; (c) convert in the engine so flows never
+   see ages. *Chosen:* **b**. A one-line conversion, the same shape validation
+   takes, and error messages can still name `fromAge`. **c** would hide
+   `fromAge` from the topic that owns it.
+6. **Filing status.** *Chosen:* not in stage 3. Nothing uses it until stage 6,
+   and it changes over time (a surviving spouse), so stage 6 should derive it
+   per year as a schedule field, possibly with an optional override.
+7. **Mortality** (`deathYear` or a planning age). *Chosen:* not in stage 3.
+   `Person` stays an object so `deathYear?` can be added without a breaking
+   change; stage 4 (Social Security survivor benefits) is the natural place.
+8. **`LIMITS.age`.** *Chosen:* export `age: { min: 0, max: 120 }`, as with
+   `years`, so clients can reuse it.
+9. **One `person` per flow.** `person` says both whose flow it is and whose
+   age `fromAge`/`toAge` use. Options: (a) one `person` for both; (b)
+   `owner?` plus `fromAge?: { person, age }`. *Chosen:* **a**. It can't
+   express a joint flow starting at an age, or a range that follows two
+   people, but both are rare and have workarounds (`fromYear`, or two flows),
+   and **b** can be added later as a second accepted shape without a breaking
+   change. Revisit in stage 6, when ownership matters for tax.
+
+### Other choices
+
+- **Age is `calendarYear - birthYear`**: the age reached during the year, in
+  whole years, the IRS convention for RMD ages. Birth months are out of scope.
+- **A past `fromAge` is allowed** ("my pension started at 60"; active from
+  year 1), but a past `toAge` is rejected, like a `toYear` before
+  `startYear`: the flow would never run.
+- **Ages are worked out once, in the schedule** (`agesFor`), like
+  `calendarYear`. Flows don't read them; they resolve their own dates from
+  the birth years.
+- **No `steps.ts`:** the household moves no money, so simulation and both
+  yearly equations are unchanged.
+- **Follow-up: wages.** A salary is `income` with `source: "other"` for now.
+  Stage 6 taxes wages differently from Social Security, so it may add
+  `source: "wages"`.
+
+### Breaking changes
+
+None. `household` and the new flow fields are optional, and existing inputs
+behave as before. Each output row gains `ages` (`{}` with no household).
+
+---
+
 ## Stage 2: Cash flows
 
 Accepted 2026-11-22 (1–6) and 2026-11-23 (7). Implemented 2026-11-24. Full

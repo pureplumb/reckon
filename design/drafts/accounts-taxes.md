@@ -2,7 +2,7 @@
 
 **Status:** Draft. An outline to record the ideas so far; the decisions at the
 end are open. Depends on stage 2 (cash flows; see [decisions.md](../decisions.md#stage-2-cash-flows)) and stage 3
-(age).
+(household and age; see [decisions.md](../decisions.md#stage-3-household-and-age)).
 
 Replaces the single portfolio balance with several **accounts** (traditional
 IRA or 401k, Roth, taxable brokerage), and adds the rules that make them
@@ -51,7 +51,7 @@ interface ProjectionInput {
   portfolio:   { accounts: Account[] };       // replaces startBalance; total = sum of balances
   spending:    { annual: number };
   flows?:      CashFlow[];
-  household:   { birthYear: number };         // from stage 3; needed for RMDs
+  household:   { people: Person[] };          // from stage 3; may become required for RMDs
   tax:         { /* to be designed; see Decision 2 */ };
 }
 
@@ -157,7 +157,7 @@ Open.
 5. **Taxable accounts.** Tax only the gains, which needs cost-basis tracking,
    or treat a fixed share of each withdrawal as gains?
 6. **RMD rules.** The starting age depends on birth year, so this needs stage 3
-   (age). How much of the IRS rules to model (inherited accounts, still
+   (age); RMDs use the account owner's `birthYear`. How much of the IRS rules to model (inherited accounts, still
    working)?
 
 ## Changes to reference docs

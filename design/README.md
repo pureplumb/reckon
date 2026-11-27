@@ -50,7 +50,7 @@ when that gives a better design. Breaking changes are listed in
 | 0 | Core projection: compounding, inflation, withdrawals, real vs nominal | [projection.md](projection.md) | Implemented |
 | 1 | Input validation | [validation.md](validation.md) | Implemented |
 | 2 | Cash flows: contributions and income | [projection.md](projection.md), [decisions.md](decisions.md#stage-2-cash-flows) | Implemented |
-| 3 | Age: a `birthYear` or `startAge`, so flows can start at an age. Needed for RMDs and Medicare | [drafts/household.md](drafts/household.md) | Draft |
+| 3 | Household and age: one or two people with birth years, so flows can start or stop at an age. Needed for RMDs and Medicare | [projection.md](projection.md#household-and-age), [decisions.md](decisions.md#stage-3-household-and-age) | Implemented |
 | 4 | Specific income types: Social Security claiming age, pension options | — | Not started |
 | 5 | Spending categories: essential and discretionary, with optional guardrails that cut discretionary spending in bad years | — | Not started |
 | 6 | Accounts and taxes: account types, withdrawal order, RMDs, gross-up for tax | [drafts/accounts-taxes.md](drafts/accounts-taxes.md) | Draft |

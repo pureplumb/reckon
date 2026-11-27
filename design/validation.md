@@ -22,13 +22,14 @@ TypeScript types are the main contract.
 |---|---|---|
 | `src/core/limits.ts` | `LIMITS`: the numeric limits shared with clients | yes, from the public API |
 | `src/core/check.ts` | `checkRange(cond, message)`: throws a `RangeError` with `message` if `cond` is falsy. A TypeScript assertion function, used by every topic. Also `isRate` and `RATE_RULE`, shared by every rate check | no (internal) |
-| `src/topics/<topic>/validate.ts` | One validator per topic: `validatePortfolio`, `validateAssumptions`, `validateSpending`, `validateTimeline`, `validateFlows`. Each takes only its own fields, except `validateFlows`, which also takes the timeline to check flow years | no |
+| `src/topics/<topic>/validate.ts` | One validator per topic: `validatePortfolio`, `validateAssumptions`, `validateSpending`, `validateTimeline`, `validateHousehold`, `validateFlows`. Each takes only its own fields, except that `validateHousehold` also takes `timeline.startYear` for the birth-year check, and `validateFlows` takes the timeline and the household's birth years (a plain `Record<string, number>`, so flows import nothing from the household topic) | no |
 | `src/engine/validate.ts` | `validateProjectionInput(input)`: calls each topic validator, in that order | no |
 
 ```ts
 export const LIMITS = {
   rate: { min: -1, max: 1 },   // min is exclusive
   years: { min: 1, max: 150 },
+  age: { min: 0, max: 120 },
 } as const;
 
 export function checkRange(cond: unknown, message: string): asserts cond;
@@ -39,9 +40,11 @@ every projection is checked. Validation stops at the first failed rule.
 
 Clients import `LIMITS` from the public API (`src/index.ts`), alongside
 `projectPortfolio`. The order of checks (portfolio, assumptions, spending,
-timeline, flows) matters only when several fields are invalid at once: the
-first failure is reported. Flows come after the timeline, because their years
-are checked against `timeline.startYear`.
+timeline, household, flows) matters only when several fields are invalid at
+once: the first failure is reported. The household and flows come after the
+timeline, because birth years and flow years are checked against
+`timeline.startYear`. Flows come last, because they refer to the household's
+people. The household is checked only when it's given.
 
 ## Rules
 
@@ -60,6 +63,15 @@ Each check combines "is a finite number" with the rule, so `NaN` and
 | `flows[i].amount` | finite, ≥ 0 | A negative flow would reverse its meaning. |
 | `flows[i].fromYear`, `.toYear` | whole numbers ≥ `timeline.startYear`; `fromYear` ≤ `toYear` when both are given | A reversed range, or one starting before the projection, is always a mistake. A `toYear` past the last projection year is allowed: the flow stops with the projection. |
 | `flows[i].indexing` `{ rate }` | finite, > -1 and ≤ 1 | Same as `returnRate`, including the units hint. |
+| `household.people` | 1 or 2 entries | A household with nobody in it is meaningless; more than two adults is out of scope. |
+| `household.people[i].id` | non-empty string, unique across people | Flows refer to people by id, and `ages` is keyed by it. |
+| `household.people[i].birthYear` | whole number; age at `timeline.startYear` from 0 to `LIMITS.age.max` | Catches a typo such as `196` for `1960`, or a birth year after the projection starts. |
+| `flows[i].person` | names a person in `household.people` | A flow can't belong to someone who doesn't exist. |
+| `flows[i].fromAge`, `.toAge` | whole numbers from 0 to `LIMITS.age.max`; `fromAge` ≤ `toAge` when both are given | Same reasoning as `fromYear`/`toYear`. |
+| `fromAge` with `fromYear`, `toAge` with `toYear` | not both | Two different start (or end) dates for one flow is always a mistake. |
+| `fromAge` or `toAge` | needs a household; with two people, also needs `person` | An age is meaningless without someone to have it. With one person, `person` defaults to them. |
+| `flows[i].toAge` | ≥ the person's age at `timeline.startYear` | Same as `toYear` ≥ `startYear`: a flow that ends before the projection never runs. A past `fromAge` is allowed, since the flow is just active from year 1. |
+| `fromAge` with `toYear`, `fromYear` with `toAge` | converted to calendar years (`birthYear + age`), the start is ≤ the end | Same as `fromYear` ≤ `toYear`. |
 
 ## Errors
 
@@ -80,6 +92,14 @@ for the two rates include the units hint:
 | `flows: [{ fromYear: 2025, … }]`, `startYear: 2026` | `flows[0].fromYear must be a whole number >= timeline.startYear (2026), got 2025` |
 | `flows: [{ fromYear: 2030, toYear: 2029, … }]` | `flows[0].toYear must be >= fromYear (2030), got 2029` |
 | `flows: [{ indexing: { rate: 3 }, … }]` | `flows[0].indexing.rate must be > -1 and <= 1 (rates are decimals: 0.05 means 5%), got 3` |
+| `household: { people: [] }` | `household.people must have 1 or 2 entries, got 0` |
+| `people: [{ id: "pat", birthYear: 2030 }]`, `startYear: 2026` | `household.people[0].birthYear must be a whole number giving an age at timeline.startYear (2026) from 0 to 120, got 2030` |
+| `flows: [{ person: "alex", … }]` | `flows[0].person must name a person in household.people, got "alex"` |
+| `flows: [{ fromAge: 67, … }]`, no household | `flows[0].fromAge needs a household, got 67` |
+| `flows: [{ fromAge: 67, … }]`, two people | `flows[0].fromAge needs person when the household has 2 people, got 67` |
+| `flows: [{ person: "pat", fromAge: 67, fromYear: 2027, … }]` | `flows[0].fromAge must not be given with fromYear (2027), got 67` |
+| `flows: [{ person: "pat", toAge: 64, … }]`, Pat born 1960, `startYear: 2026` | `flows[0].toAge must be >= pat's age at timeline.startYear (66), got 64` |
+| `flows: [{ person: "pat", fromAge: 67, toYear: 2026, … }]`, Pat born 1960 | `flows[0].toYear must be >= the year pat reaches fromAge (2027, age 67), got 2026` |
 
 ## Out of scope
 
@@ -103,6 +123,9 @@ Tests are in the `input validation` block of
 - Both rates entered as `5` give the "0.05 means 5%" hint.
 - Flows are validated through `projectPortfolio()` with their index in the
   path, and an invalid `timeline.startYear` is reported before flow years.
+- The household is validated through `projectPortfolio()` before the flows
+  that refer to it, and flows are checked against its people.
 
 Each flow rule, with its exact message and boundaries, is tested on its own in
-`tests/topics/flows/validate.test.ts`.
+`tests/topics/flows/validate.test.ts`, and each household rule in
+`tests/topics/household/validate.test.ts`.

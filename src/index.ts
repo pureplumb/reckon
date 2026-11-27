@@ -7,5 +7,6 @@ export type {
     ProjectionYear,
 } from "./engine/result";
 export type { CashFlow, Contribution, Income } from "./topics/flows/types";
+export type { Household, Person } from "./topics/household/types";
 export type { Indexing } from "./core/indexing";
 export { LIMITS } from "./core/limits";

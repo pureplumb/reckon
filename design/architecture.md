@@ -33,8 +33,10 @@ src/
 │   ├── assumptions/            Assumptions
 │   ├── portfolio/              Portfolio; steps: initialState, grow
 │   ├── spending/               SpendingInput, SpendingSlice, spendingFor; steps: withdrawForSpending
-│   └── flows/                  CashFlow, Contribution, Income, FlowsSlice, flowForYear;
-│                               validateFlows; steps: depositContributions, reinvest
+│   ├── flows/                  CashFlow, Contribution, Income, FlowsSlice, flowForYear,
+│   │                           activeYears; validateFlows; steps: depositContributions, reinvest
+│   └── household/              Person, Household, HouseholdSlice, agesFor, birthYearsOf;
+│                               validateHousehold (stage 3; no steps)
 └── engine/                     connects topics; contains no topic logic
     ├── input.ts                ProjectionInput, composed from topic types
     ├── result.ts               ProjectionYear, ProjectionSummary, ProjectionResult
@@ -84,7 +86,10 @@ Imports go one way only: `core` ← `topics` ← `engine` ← `index.ts`.
 - `core` imports nothing from the project.
 - A topic imports only `core`, plus `topics/timeline/types` for `YearRef`,
   which every topic needs. Topics never import from `engine` or from other
-  topics.
+  topics. When one topic needs another's data, the engine passes it as a
+  plain value: flows take the household's birth years as
+  `Record<string, number>`, not the `Household` type, and spending takes
+  `inflationRate: number`, not `Assumptions`.
 - `engine` imports topics, and only `index.ts` imports `engine`.
 
 This rules out circular imports, and each topic can be tested without the
@@ -104,11 +109,11 @@ There is no single `types.ts` for the whole library:
   // engine/input.ts
   interface ProjectionInput {
     timeline: Timeline; assumptions: Assumptions; portfolio: Portfolio;
-    spending: SpendingInput; flows?: CashFlow[];
+    spending: SpendingInput; flows?: CashFlow[]; household?: Household;
   }
 
   // engine/schedule.ts
-  type ScheduleYear = YearRef & SpendingSlice & FlowsSlice;
+  type ScheduleYear = YearRef & SpendingSlice & FlowsSlice & HouseholdSlice;
   ```
 
   A new topic adds one field to `ProjectionInput` and one slice to
@@ -133,7 +138,7 @@ interface ProjectionInput {
   portfolio:   { startBalance: number };  // stage 6: { accounts: Account[] }
   spending:    { annual: number };        // stage 5: essential, discretionary, guardrails
   flows?:      CashFlow[];
-  // stage 3:  household: { birthYear: number; ... }
+  household?: { people: Person[] };      // stage 3
   // stage 6:  tax: { ... }
 }
 ```
@@ -186,25 +191,33 @@ export const projectionYears = ({ startYear, years }: Timeline): YearRef[] =>
 from each topic's builder:
 
 ```ts
-const buildSchedule = (input: ProjectionInput): ScheduleYear[] =>
-  projectionYears(input.timeline).map((y) => ({
+const buildSchedule = (input: ProjectionInput): ScheduleYear[] => {
+  const birthYears = birthYearsOf(input.household);         // { pat: 1960, … }; {} with no household
+  return projectionYears(input.timeline).map((y) => ({
     ...y,                                                    // year, calendarYear
     ...spendingFor(input.spending, input.assumptions.inflationRate, y),    // spending
     ...flowForYear(input.flows ?? [], y, input.timeline, input.assumptions.inflationRate, birthYears),
                                                              // income, contributions, flows
-    // stage 6: ...rmdPercentFor(input.household, y), ...returnRatesFor(input.portfolio, y)
+    ...agesFor(input.household, y),                          // ages
+    // stage 6: ...rmdPercentFor(…, y), ...returnRatesFor(input.portfolio, y)
   }));
+};
 ```
 
 **Each builder takes only the groups it uses, plus the `YearRef`**, and
 returns only its own slice, e.g.
-`flowForYear(flows, y, timeline, inflationRate): FlowsSlice`. Builders never take
+`flowForYear(flows, y, timeline, inflationRate, birthYears): FlowsSlice`. Builders never take
 the whole `ProjectionInput`: that type lives in `engine`, and importing it
 would break the [dependency rule](#dependency-rule). Taking only their own
 groups also makes each builder's needs obvious, and its tests build only what
 it uses. The same applies to validators, and checks that span groups (a
-flow's `fromYear` ≥ `timeline.startYear`) receive the other group as an
-argument.
+flow's `fromYear` ≥ `timeline.startYear`, a flow's `person` existing) receive
+the other group, or a plain value derived from it, as an argument.
+
+A flow dated by age is converted to calendar years (`birthYear + age`) inside
+the flows builder (`activeYears`), so after that it is an ordinary
+year-dated flow. Flows never read the `ages` slice: `ages` is there for the
+output now, and for RMDs and Medicare later.
 
 The combined `ScheduleYear` type is checked by TypeScript, and each builder
 can be tested on its own.
