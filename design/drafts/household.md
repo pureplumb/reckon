@@ -181,15 +181,19 @@ New rules for [validation.md](../validation.md#rules):
 | `flows[i].fromAge`, `.toAge` | whole numbers from 0 to `LIMITS.age.max`; `fromAge` ≤ `toAge` when both are given | Same reasoning as `fromYear`/`toYear`. |
 | `fromAge` with `fromYear`, `toAge` with `toYear` | not both | Two different start dates for one flow is always a mistake. |
 | `fromAge` or `toAge` | needs `person` (see Decision 4), and so needs `household` | An age is meaningless without someone to have it. |
+| `toAge` | ≥ the person's age at `timeline.startYear` | Same as `toYear` ≥ `startYear`: a flow that ends before the projection never runs, so it's a typo. A past `fromAge` is fine, since the flow is active from year 1. |
+| `fromAge` with `toYear`, `fromYear` with `toAge` | converted to calendar years (`birthYear + age`), the start is ≤ the end | Same reasoning as `fromYear`/`toYear`: a range that ends before it starts is always a mistake. |
 
 The flow checks need the people, so `validateFlows` runs after
 `validateHousehold` and takes the person ids and birth years as a plain
 argument (`Record<string, number>`), not the `Household` type, so flows still
 import nothing from another topic.
 
-**An age before the projection starts is allowed.** A `fromYear` before
+**A start age before the projection starts is allowed.** A `fromYear` before
 `startYear` is rejected as a mistake, but `fromAge: 60` for someone already 62
-is normal ("my pension started at 60"). The flow is active from year 1.
+is normal ("my pension started at 60"). The flow is active from year 1. An
+end age before the projection is not: like a `toYear` before `startYear`, the
+flow would never run.
 
 ### Schedule
 
@@ -267,7 +271,7 @@ RMDs and Medicare later.
    ```ts
    projectionYears(input.timeline).map((y) => ({
      ...y,
-     ...spendingFor(input.spending, input.assumptions, y),
+     ...spendingFor(input.spending, input.assumptions.inflationRate, y),
      ...flowForYear(flows, y, input.timeline, inflationRate, birthYears),
      ...agesFor(input.household, y),     // { ages: {} } when no household
    }));

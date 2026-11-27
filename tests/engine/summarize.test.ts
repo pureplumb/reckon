@@ -9,6 +9,7 @@ const row = (year: number, o: Partial<ProjectionYear> = {}): ProjectionYear => (
     income: 0,
     contributions: 0,
     flows: {},
+    ages: {},
     startBalance: 0,
     withdrawal: 0,
     shortfall: 0,

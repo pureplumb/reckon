@@ -1,5 +1,4 @@
-import type { SimState } from "@/core/state";
-import { withdrawUpTo } from "@/core/state";
+import { type SimState, withdrawUpTo } from "../../core/state";
 
 export interface WithdrawSpendingResults {
     withdrawal: number;

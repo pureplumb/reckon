@@ -41,3 +41,43 @@ describe("amounts", () => {
         expect(record).toEqual({ pension: 20_000, ss: 0, savings: 10_000 });
     });
 });
+
+describe("age-based flows", () => {
+    // Pat born 1960 (66 in 2026), Sam born 1963 (63 in 2026)
+    const couple = { pat: 1960, sam: 1963 };
+    const withAges = (f: CashFlow, birthYears: Record<string, number> = couple) =>
+        years.map((y) => flowAmount(f, y, timeline, inflationRate, birthYears));
+    const flat = { type: "contribution", amount: 100, indexing: "none" } as const;
+
+    test("fromAge starts the flow in the year the person reaches it", () => {
+        expect(withAges({ ...flat, id: "a", person: "pat", fromAge: 68 })).toEqual([0, 0, 100, 100]);
+    });
+
+    test("toAge stops the flow after the year the person reaches it", () => {
+        expect(withAges({ ...flat, id: "a", person: "sam", toAge: 64 })).toEqual([100, 100, 0, 0]);
+    });
+
+    test("a fromAge before the projection is active from year 1", () => {
+        expect(withAges({ ...flat, id: "a", person: "pat", fromAge: 60 })).toEqual([100, 100, 100, 100]);
+    });
+
+    test("ages follow the flow's own person", () => {
+        // Both age 65: pat in 2025 (before the projection), sam in 2028
+        expect(withAges({ ...flat, id: "a", person: "pat", fromAge: 65 })).toEqual([100, 100, 100, 100]);
+        expect(withAges({ ...flat, id: "a", person: "sam", fromAge: 65 })).toEqual([0, 0, 100, 100]);
+    });
+
+    test("without person, ages use the only person (Decision 4)", () => {
+        expect(withAges({ ...flat, id: "a", fromAge: 67, toAge: 68 }, { pat: 1960 })).toEqual([0, 100, 100, 0]);
+    });
+
+    test("ages and years mix", () => {
+        expect(withAges({ ...flat, id: "a", person: "pat", fromAge: 67, toYear: 2028 })).toEqual([0, 100, 100, 0]);
+        expect(withAges({ ...flat, id: "a", person: "sam", fromYear: 2027, toAge: 64 })).toEqual([0, 100, 0, 0]);
+    });
+
+    test("an age-dated flow still grows from year 1 (today's dollars)", () => {
+        const [, , y3] = withAges({ ...ss, fromYear: undefined, person: "pat", fromAge: 68 });
+        expect(y3).toBeCloseTo(25_461.6); // same as ss with fromYear: 2028
+    });
+});

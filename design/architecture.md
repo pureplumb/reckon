@@ -189,8 +189,8 @@ from each topic's builder:
 const buildSchedule = (input: ProjectionInput): ScheduleYear[] =>
   projectionYears(input.timeline).map((y) => ({
     ...y,                                                    // year, calendarYear
-    ...spendingFor(input.spending, input.assumptions, y),    // spending
-    ...flowForYear(input.flows ?? [], y, input.timeline, input.assumptions.inflationRate),
+    ...spendingFor(input.spending, input.assumptions.inflationRate, y),    // spending
+    ...flowForYear(input.flows ?? [], y, input.timeline, input.assumptions.inflationRate, birthYears),
                                                              // income, contributions, flows
     // stage 6: ...rmdPercentFor(input.household, y), ...returnRatesFor(input.portfolio, y)
   }));

@@ -270,6 +270,29 @@ describe("input validation", () => {
         expect(() => projectPortfolio(input)).toThrow(/^flows\[0\]\.fromYear .* \(2030\), got 2029$/);
     });
 
+    test("the household is validated, and before flows that refer to it", () => {
+        const input: ProjectionInput = {
+            ...example,
+            household: { people: [{ id: "pat", birthYear: 2030 }] },
+            flows: [{ id: "ss", type: "income", source: "socialSecurity",
+                amount: 1, indexing: "none", person: "alex" }],
+        };
+        expect(() => projectPortfolio(input)).toThrow(RangeError);
+        expect(() => projectPortfolio(input)).toThrow(/^household\.people\[0\]\.birthYear .*, got 2030$/);
+    });
+
+    test("flows are checked against the household's people", () => {
+        const input: ProjectionInput = {
+            ...example,
+            household: { people: [{ id: "pat", birthYear: 1960 }] },
+            flows: [{ id: "ss", type: "income", source: "socialSecurity",
+                amount: 1, indexing: "none", person: "alex" }],
+        };
+        expect(() => projectPortfolio(input)).toThrow('flows[0].person must name a person in household.people, got "alex"');
+        const ok = { ...input, flows: [{ ...input.flows![0]!, person: "pat", fromAge: 67 }] } as ProjectionInput;
+        expect(() => projectPortfolio(ok)).not.toThrow();
+    });
+
     test("an invalid timeline is reported before flows that depend on it", () => {
         const input: ProjectionInput = {
             ...example,

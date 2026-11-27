@@ -79,6 +79,7 @@ describe("rows", () => {
         const [row] = buildSchedule(example);
         expect(Object.keys(row!).sort()).toEqual(
             [
+                "ages",
                 "calendarYear",
                 "contributions",
                 "flows",
@@ -184,5 +185,44 @@ describe("independence from the portfolio", () => {
         const input = structuredClone(example);
         buildSchedule(input);
         expect(input).toEqual(example);
+    });
+});
+
+describe("household", () => {
+    test("each row has each person's age that year", () => {
+        const schedule = buildSchedule({
+            ...example,
+            household: { people: [{ id: "pat", birthYear: 1960 }, { id: "sam", birthYear: 1963 }] },
+        });
+        expect(schedule.map((r) => r.ages)).toEqual([
+            { pat: 66, sam: 63 },
+            { pat: 67, sam: 64 },
+            { pat: 68, sam: 65 },
+            { pat: 69, sam: 66 },
+        ]);
+    });
+
+    test("age-based flows are resolved with the household's birth years", () => {
+        const schedule = buildSchedule({
+            ...example,
+            household: { people: [{ id: "pat", birthYear: 1960 }, { id: "sam", birthYear: 1963 }] },
+            flows: [
+                { id: "pat-ss", type: "income", source: "socialSecurity", amount: 1_000, indexing: "none", person: "pat", fromAge: 67 },
+                { id: "sam-401k", type: "contribution", amount: 500, person: "sam", toAge: 64 },
+            ],
+        });
+        expect(schedule.map((r) => r.flows)).toEqual([
+            { "pat-ss": 0, "sam-401k": 500 },
+            { "pat-ss": 1_000, "sam-401k": 500 },
+            { "pat-ss": 1_000, "sam-401k": 0 },
+            { "pat-ss": 1_000, "sam-401k": 0 },
+        ]);
+        expect(schedule.map((r) => [r.income, r.contributions])).toEqual([
+            [0, 500], [1_000, 500], [1_000, 0], [1_000, 0],
+        ]);
+    });
+
+    test("no household gives empty ages", () => {
+        for (const row of buildSchedule(example)) expect(row.ages).toEqual({});
     });
 });

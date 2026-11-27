@@ -1,4 +1,4 @@
-import { deposit, type SimState } from "@/core/state";
+import { deposit, type SimState } from "../../core/state";
 
 /**
  * Increase account balance(s) based on any contributions.
